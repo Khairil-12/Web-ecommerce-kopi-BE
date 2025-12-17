@@ -295,17 +295,6 @@ def get_products():
             'message': f'Get products error: {str(e)}'
         }), 500
 
-@bp.route('/products/<int:id>', methods=['GET'])
-def get_product(id):
-    try:
-        from app.controllers.ProductController import show
-        return show(id)
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Get product error: {str(e)}'
-        }), 500
-
 @bp.route('/products', methods=['POST'])
 def create_product():
     try:
@@ -364,6 +353,7 @@ def update_product(id):
             'message': f'Update product error: {str(e)}'
         }), 500
 
+#=== PRODUCT SOFT DELETE /  DEACTIVATE PRODUCTS ===
 @bp.route('/products/<int:id>', methods=['DELETE'])
 def delete_product(id):
     try:
@@ -372,7 +362,7 @@ def delete_product(id):
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'X-User-ID header is required'
+                'message': 'Authentication required'
             }), 401
         
         from app.models.user import User
@@ -383,14 +373,144 @@ def delete_product(id):
                 'message': 'Admin access required'
             }), 403
         
-        # Call ProductController delete
-        from app.controllers.ProductController import delete
-        return delete(id)
+        from app.models.product import Product
+        from app import db
+        
+        product = Product.query.get(id)
+        if not product:
+            return jsonify({
+                'status': 'error',
+                'message': f'Product with ID {id} not found'
+            }), 404
+        
+        if hasattr(product, 'is_active'):
+            product.is_active = False
+        elif hasattr(product, 'is_available'):
+            product.is_available = False
+        else:
+            # Jika tidak ada attribute status, tambahkan field deleted_at
+            if hasattr(product, 'deleted_at'):
+                product.deleted_at = datetime.utcnow()
+            else:
+                # Simpan nama untuk audit lalu hard delete
+                product_name = product.name
+                # Hapus stock terlebih dahulu
+                from app.models.stock import Stock
+                stock = Stock.query.filter_by(product_id=id).first()
+                if stock:
+                    db.session.delete(stock)
+                # Hapus product
+                db.session.delete(product)
+                db.session.commit()
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Product "{product_name}" permanently deleted',
+                    'data': {
+                        'id': id,
+                        'name': product_name,
+                        'deleted_at': datetime.utcnow().isoformat()
+                    }
+                })
+        
+        product.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Product "{product.name}" has been deactivated',
+            'data': {
+                'id': product.id,
+                'name': product.name,
+                'status': 'deactivated',
+                'deactivated_at': product.updated_at.isoformat() if product.updated_at else None
+            }
+        })
         
     except Exception as e:
+        db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Delete product error: {str(e)}'
+            'message': f'Error deleting product: {str(e)}'
+        }), 500
+    
+#ACTIVATE PRODUCT
+@bp.route('/products/<int:id>/activate', methods=['PUT'])
+def activate_product(id):
+    """Reactivate a deactivated product (admin only)"""
+    try:
+        # Check admin access
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Authentication required'
+            }), 401
+        
+        from app.models.user import User
+        user = User.query.get(int(user_id))
+        if not user or not user.is_admin:
+            return jsonify({
+                'status': 'error',
+                'message': 'Admin access required'
+            }), 403
+        
+        from app.models.product import Product
+        from app import db
+        
+        product = Product.query.get(id)
+        if not product:
+            return jsonify({
+                'status': 'error',
+                'message': f'Product with ID {id} not found'
+            }), 404
+        
+        # Reactivate product
+        activated = False
+        
+        if hasattr(product, 'is_active'):
+            if not product.is_active:
+                product.is_active = True
+                activated = True
+        elif hasattr(product, 'is_available'):
+            if not product.is_available:
+                product.is_available = True
+                activated = True
+        elif hasattr(product, 'deleted_at'):
+            if product.deleted_at:
+                product.deleted_at = None
+                activated = True
+        
+        if not activated:
+            return jsonify({
+                'status': 'info',
+                'message': f'Product "{product.name}" is already active',
+                'data': {
+                    'id': product.id,
+                    'name': product.name,
+                    'status': 'active'
+                }
+            })
+        
+        product.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Product "{product.name}" has been reactivated',
+            'data': {
+                'id': product.id,
+                'name': product.name,
+                'status': 'active',
+                'reactivated_at': product.updated_at.isoformat() if product.updated_at else None
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Error activating product: {str(e)}'
         }), 500
 
 # === ADMIN ROUTES ===
@@ -875,6 +995,141 @@ def clear_cart():
         return jsonify({
             'status': 'error',
             'message': f'Clear cart error: {str(e)}'
+        }), 500
+
+# === CHECKOUT CART ===
+@bp.route('/cart/checkout', methods=['POST'])
+def checkout_cart():
+    try:
+        from app.models.cart import Cart, CartItem
+        from app.models.product import Product
+        from app.models.transaction import Transaction, TransactionItem
+        from app.models.user import User
+        from app.models.stock import Stock
+        from app import db
+        import random
+        import string
+        
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Authentication required'
+            }), 401
+        
+        data = request.json
+        payment_method = data.get('payment_method', 'Bank Transfer')
+        shipping_address = data.get('shipping_address')
+        notes = data.get('notes', '')
+        
+        # Get user for shipping address if not provided
+        user = User.query.get(int(user_id))
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': 'User not found'
+            }), 404
+        
+        if not shipping_address:
+            shipping_address = user.address
+        
+        # Get cart
+        cart = Cart.query.filter_by(user_id=int(user_id)).first()
+        if not cart:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cart is empty'
+            }), 400
+        
+        cart_items = CartItem.query.filter_by(cart_id=cart.id).all()
+        if not cart_items:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cart is empty'
+            }), 400
+        
+        # Calculate total and check stock
+        total_amount = 0
+        transaction_items = []
+        
+        for item in cart_items:
+            product = Product.query.get(item.product_id)
+            if not product:
+                continue
+            
+            # Check stock
+            stock = Stock.query.filter_by(product_id=product.id).first()
+            if not stock or stock.quantity < item.quantity:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Insufficient stock for {product.name}. Available: {stock.quantity if stock else 0}'
+                }), 400
+            
+            # Calculate subtotal
+            price = float(product.price) if product.price else 0
+            subtotal = price * item.quantity
+            total_amount += subtotal
+            
+            # Prepare transaction item
+            transaction_item = TransactionItem(
+                product_id=product.id,
+                quantity=item.quantity,
+                price=price,
+                subtotal=subtotal
+            )
+            transaction_items.append(transaction_item)
+        
+        # Generate transaction code
+        def generate_code():
+            date_str = datetime.utcnow().strftime("%Y%m%d")
+            random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            return f"TRX-{date_str}-{random_str}"
+        
+        # Create transaction
+        transaction = Transaction(
+            transaction_code=generate_code(),
+            user_id=int(user_id),
+            total_amount=total_amount,
+            status='pending',
+            payment_method=payment_method,
+            shipping_address=shipping_address,
+            notes=notes
+        )
+        
+        db.session.add(transaction)
+        db.session.flush()  # Get transaction ID
+        
+        # Add items to transaction and reduce stock
+        for i, item in enumerate(transaction_items):
+            item.transaction_id = transaction.id
+            db.session.add(item)
+            
+            # Reduce stock
+            stock = Stock.query.filter_by(product_id=item.product_id).first()
+            stock.quantity -= item.quantity
+        
+        # Clear cart after checkout
+        CartItem.query.filter_by(cart_id=cart.id).delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Checkout successful. Order created!',
+            'data': {
+                'transaction_id': transaction.id,
+                'transaction_code': transaction.transaction_code,
+                'total_amount': float(transaction.total_amount),
+                'status': transaction.status,
+                'item_count': len(transaction_items)
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Checkout error: {str(e)}'
         }), 500
 
 # === HEALTH CHECK ===

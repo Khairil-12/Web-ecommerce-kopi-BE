@@ -1,23 +1,9 @@
 from flask import Blueprint, jsonify, request
-from datetime import datetime, timedelta
+from datetime import datetime
 import random
 import string
-from app.models.user import User
-from app.models.product import Product
-from app.models.stock import Stock
-from app.models.cart import Cart, CartItem
-from app.models.transaction import Transaction, TransactionItem
-from app import db
-from app import response
 
 bp = Blueprint('api', __name__)
-
-# === UTILITY FUNCTIONS ===
-def generate_transaction_code():
-    """Generate unique transaction code"""
-    date_str = datetime.utcnow().strftime("%Y%m%d")
-    random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    return f"TRX-{date_str}-{random_str}"
 
 # === HOME ===
 @bp.route('/')
@@ -27,10 +13,7 @@ def home():
         'message': 'Ecommerce Kopi API',
         'version': '2.0.0',
         'timestamp': datetime.utcnow().isoformat(),
-        'database_tables': [
-            'users', 'products', 'stocks', 'carts', 
-            'cart_items', 'transactions', 'transaction_items'
-        ]
+        'testing_guide': 'Check /test endpoint for testing instructions'
     })
 
 # === TEST ENDPOINT ===
@@ -38,48 +21,60 @@ def home():
 def test():
     return jsonify({
         'status': 'success',
-        'message': 'API is working',
+        'message': 'API Ready for Postman Testing',
         'timestamp': datetime.utcnow().isoformat(),
-        'database_connected': True,
-        'testing_endpoints': {
+        'testing_steps': [
+            '1. POST /users - Register admin user (set is_admin: true)',
+            '2. POST /login - Login as admin',
+            '3. Save admin ID from response',
+            '4. POST /users - Register customer user',
+            '5. POST /login - Login as customer',
+            '6. Save customer ID from response',
+            '7. Use admin ID in header (X-User-ID) to create products',
+            '8. Use customer ID to test cart functionality'
+        ],
+        'endpoints': {
             'AUTH': [
-                'POST /login - Login user',
-                'POST /users - Register new user'
+                'POST /login - Login',
+                'POST /users - Register'
             ],
             'USERS': [
-                'GET /users - Get all users (admin)',
+                'GET /users - Get all users (admin only)',
                 'GET /users/<id> - Get user by ID',
                 'POST /users - Create user',
                 'PUT /users/<id> - Update user',
-                'DELETE /users/<id> - Delete user'
+                'DELETE /users/<id> - Delete user (admin only)'
             ],
             'PRODUCTS': [
                 'GET /products - Get all products',
                 'GET /products/<id> - Get product by ID',
-                'POST /products - Create product',
-                'PUT /products/<id> - Update product',
-                'DELETE /products/<id> - Delete product'
+                'POST /products - Create product (admin only)',
+                'PUT /products/<id> - Update product (admin only)',
+                'DELETE /products/<id> - Delete product (admin only)'
             ],
             'ADMIN': [
                 'GET /admin/dashboard - Admin dashboard',
-                'GET /admin/users - All users (admin)',
-                'POST /admin/products - Create product (admin)',
-                'GET /admin/transactions - All transactions (admin)'
+                'GET /admin/users - All users (admin view)',
+                'GET /admin/transactions - All transactions (admin view)'
             ],
             'CART': [
                 'GET /cart - Get user cart',
                 'POST /cart/add - Add to cart',
                 'PUT /cart/update/<id> - Update cart item',
                 'DELETE /cart/remove/<id> - Remove from cart',
-                'POST /cart/checkout - Checkout cart'
+                'POST /cart/checkout - Checkout'
             ]
         }
     })
 
-# === LOGIN ===
+# === LOGIN (Updated based on your controller) ===
 @bp.route('/login', methods=['POST'])
 def login():
     try:
+        # Call UserController's store function for login logic
+        from app.models.user import User
+        from app import response
+        
         data = request.json
         if not data or 'email' not in data or 'password' not in data:
             return jsonify({
@@ -94,15 +89,10 @@ def login():
                 'id': user.id,
                 'username': user.username,
                 'email': user.email,
-                'phone': user.phone if hasattr(user, 'phone') else '',
+                'phone': user.phone,
                 'is_admin': user.is_admin,
-                'is_verified': user.is_verified if hasattr(user, 'is_verified') else True,
                 'created_at': user.created_at.isoformat() if user.created_at else None
             }
-            
-            # Add full_name if exists
-            if hasattr(user, 'full_name') and user.full_name:
-                user_data['full_name'] = user.full_name
             
             # Add address if exists
             if hasattr(user, 'address') and user.address:
@@ -112,7 +102,7 @@ def login():
                 'status': 'success',
                 'message': 'Login successful',
                 'data': user_data,
-                'token': f'mock-jwt-token-{user.id}'  # Mock token for testing
+                'token': f'mock-jwt-token-{user.id}'
             })
         else:
             return jsonify({
@@ -126,91 +116,9 @@ def login():
             'message': f'Login error: {str(e)}'
         }), 500
 
-# === USER ROUTES ===
-@bp.route('/users', methods=['POST'])
-def create_user():
-    """Register new user"""
-    try:
-        data = request.json
-        
-        # Validate required fields
-        required_fields = ['username', 'email', 'password']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({
-                    'status': 'error',
-                    'message': f'{field.replace("_", " ").title()} is required'
-                }), 400
-        
-        # Check if email already exists
-        existing_user = User.query.filter_by(email=data['email']).first()
-        if existing_user:
-            return jsonify({
-                'status': 'error',
-                'message': 'Email already registered'
-            }), 400
-        
-        # Check if username already exists
-        existing_username = User.query.filter_by(username=data['username']).first()
-        if existing_username:
-            return jsonify({
-                'status': 'error',
-                'message': 'Username already taken'
-            }), 400
-        
-        # Create new user
-        new_user = User(
-            username=data['username'],
-            email=data['email'],
-            password=data['password'],  # Assuming you have password hashing in User model
-            is_admin=data.get('is_admin', False),  # Default to regular user
-            is_verified=True  # Auto-verify for testing
-        )
-        
-        # Add optional fields
-        if 'full_name' in data:
-            new_user.full_name = data['full_name']
-        if 'phone' in data:
-            new_user.phone = data['phone']
-        if 'address' in data:
-            new_user.address = data['address']
-        
-        db.session.add(new_user)
-        db.session.commit()
-        
-        # Prepare response data (without password)
-        user_data = {
-            'id': new_user.id,
-            'username': new_user.username,
-            'email': new_user.email,
-            'is_admin': new_user.is_admin,
-            'is_verified': new_user.is_verified,
-            'created_at': new_user.created_at.isoformat() if new_user.created_at else None
-        }
-        
-        if hasattr(new_user, 'full_name') and new_user.full_name:
-            user_data['full_name'] = new_user.full_name
-        if hasattr(new_user, 'phone') and new_user.phone:
-            user_data['phone'] = new_user.phone
-        if hasattr(new_user, 'address') and new_user.address:
-            user_data['address'] = new_user.address
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'User registered successfully',
-            'data': user_data
-        }), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': f'Error creating user: {str(e)}'
-        }), 500
-
+# === USER ROUTES (using your UserController) ===
 @bp.route('/users', methods=['GET'])
 def get_users():
-    """Get all users (admin only)"""
     try:
         # Check admin access
         user_id = request.headers.get('X-User-ID')
@@ -220,58 +128,40 @@ def get_users():
                 'message': 'X-User-ID header is required'
             }), 401
         
+        from app.models.user import User
         user = User.query.get(int(user_id))
-        if not user:
-            return jsonify({
-                'status': 'error',
-                'message': f'User with ID {user_id} not found'
-            }), 404
-        
-        if not user.is_admin:
+        if not user or not user.is_admin:
             return jsonify({
                 'status': 'error',
                 'message': 'Admin access required'
             }), 403
         
-        # Get all users
-        users = User.query.all()
-        
-        users_data = []
-        for u in users:
-            user_data = {
-                'id': u.id,
-                'username': u.username,
-                'email': u.email,
-                'is_admin': u.is_admin,
-                'is_verified': u.is_verified if hasattr(u, 'is_verified') else True,
-                'created_at': u.created_at.isoformat() if u.created_at else None
-            }
-            
-            if hasattr(u, 'full_name') and u.full_name:
-                user_data['full_name'] = u.full_name
-            if hasattr(u, 'phone') and u.phone:
-                user_data['phone'] = u.phone
-            if hasattr(u, 'address') and u.address:
-                user_data['address'] = u.address
-            
-            users_data.append(user_data)
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Found {len(users_data)} users',
-            'data': users_data,
-            'count': len(users_data)
-        })
+        # Call UserController index
+        from app.controllers.UserController import index
+        result = index()
+        return result
         
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Error getting users: {str(e)}'
+            'message': f'Get users error: {str(e)}'
+        }), 500
+
+@bp.route('/users', methods=['POST'])
+def create_user():
+    try:
+        # Call UserController store
+        from app.controllers.UserController import store
+        return store()
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Create user error: {str(e)}'
         }), 500
 
 @bp.route('/users/<int:id>', methods=['GET'])
 def get_user(id):
-    """Get user by ID"""
     try:
         # Check authentication
         requester_id = request.headers.get('X-User-ID')
@@ -281,6 +171,7 @@ def get_user(id):
                 'message': 'Authentication required'
             }), 401
         
+        from app.models.user import User
         requester = User.query.get(int(requester_id))
         if not requester:
             return jsonify({
@@ -288,51 +179,32 @@ def get_user(id):
                 'message': 'Invalid user'
             }), 401
         
-        user = User.query.get(id)
-        if not user:
+        # Check permission
+        target_user = User.query.get(id)
+        if not target_user:
             return jsonify({
                 'status': 'error',
                 'message': f'User with ID {id} not found'
             }), 404
         
-        # Check permission (own data or admin)
-        if requester.id != user.id and not requester.is_admin:
+        if requester.id != target_user.id and not requester.is_admin:
             return jsonify({
                 'status': 'error',
                 'message': 'Access denied'
             }), 403
         
-        user_data = {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'is_admin': user.is_admin,
-            'is_verified': user.is_verified if hasattr(user, 'is_verified') else True,
-            'created_at': user.created_at.isoformat() if user.created_at else None
-        }
-        
-        if hasattr(user, 'full_name') and user.full_name:
-            user_data['full_name'] = user.full_name
-        if hasattr(user, 'phone') and user.phone:
-            user_data['phone'] = user.phone
-        if hasattr(user, 'address') and user.address:
-            user_data['address'] = user.address
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'User found',
-            'data': user_data
-        })
+        # Call UserController show
+        from app.controllers.UserController import show
+        return show(id)
         
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Error getting user: {str(e)}'
+            'message': f'Get user error: {str(e)}'
         }), 500
 
 @bp.route('/users/<int:id>', methods=['PUT'])
 def update_user(id):
-    """Update user"""
     try:
         # Check authentication
         requester_id = request.headers.get('X-User-ID')
@@ -342,6 +214,7 @@ def update_user(id):
                 'message': 'Authentication required'
             }), 401
         
+        from app.models.user import User
         requester = User.query.get(int(requester_id))
         if not requester:
             return jsonify({
@@ -349,107 +222,32 @@ def update_user(id):
                 'message': 'Invalid user'
             }), 401
         
-        user = User.query.get(id)
-        if not user:
+        # Check permission
+        target_user = User.query.get(id)
+        if not target_user:
             return jsonify({
                 'status': 'error',
                 'message': f'User with ID {id} not found'
             }), 404
         
-        # Check permission (own data or admin)
-        if requester.id != user.id and not requester.is_admin:
+        if requester.id != target_user.id and not requester.is_admin:
             return jsonify({
                 'status': 'error',
                 'message': 'Can only update your own profile'
             }), 403
         
-        data = request.json
-        if not data:
-            return jsonify({
-                'status': 'error',
-                'message': 'No data provided'
-            }), 400
-        
-        # Update fields
-        updated = False
-        
-        # Only admin can change is_admin
-        if 'is_admin' in data and requester.is_admin:
-            user.is_admin = bool(data['is_admin'])
-            updated = True
-        
-        # Regular fields
-        update_fields = ['full_name', 'phone', 'address']
-        for field in update_fields:
-            if field in data:
-                setattr(user, field, data[field])
-                updated = True
-        
-        # Email update (with uniqueness check)
-        if 'email' in data and data['email'] != user.email:
-            existing = User.query.filter_by(email=data['email']).first()
-            if existing and existing.id != user.id:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Email already in use'
-                }), 400
-            user.email = data['email']
-            updated = True
-        
-        # Username update (with uniqueness check)
-        if 'username' in data and data['username'] != user.username:
-            existing = User.query.filter_by(username=data['username']).first()
-            if existing and existing.id != user.id:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Username already taken'
-                }), 400
-            user.username = data['username']
-            updated = True
-        
-        # Password update
-        if 'password' in data:
-            user.password = data['password']  # Assuming password hashing in model
-            updated = True
-        
-        if updated:
-            user.updated_at = datetime.utcnow()
-            db.session.commit()
-        
-        # Prepare response
-        user_data = {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'is_admin': user.is_admin,
-            'is_verified': user.is_verified if hasattr(user, 'is_verified') else True,
-            'updated_at': user.updated_at.isoformat() if user.updated_at else None
-        }
-        
-        if hasattr(user, 'full_name') and user.full_name:
-            user_data['full_name'] = user.full_name
-        if hasattr(user, 'phone') and user.phone:
-            user_data['phone'] = user.phone
-        if hasattr(user, 'address') and user.address:
-            user_data['address'] = user.address
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'User updated successfully' if updated else 'No changes made',
-            'data': user_data,
-            'updated': updated
-        })
+        # Call UserController update
+        from app.controllers.UserController import update
+        return update(id)
         
     except Exception as e:
-        db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Error updating user: {str(e)}'
+            'message': f'Update user error: {str(e)}'
         }), 500
 
 @bp.route('/users/<int:id>', methods=['DELETE'])
 def delete_user(id):
-    """Delete user (admin only)"""
     try:
         # Check admin access
         admin_id = request.headers.get('X-User-ID')
@@ -459,6 +257,7 @@ def delete_user(id):
                 'message': 'Authentication required'
             }), 401
         
+        from app.models.user import User
         admin = User.query.get(int(admin_id))
         if not admin or not admin.is_admin:
             return jsonify({
@@ -466,169 +265,59 @@ def delete_user(id):
                 'message': 'Admin access required'
             }), 403
         
-        user = User.query.get(id)
-        if not user:
-            return jsonify({
-                'status': 'error',
-                'message': f'User with ID {id} not found'
-            }), 404
-        
         # Prevent self-deletion
-        if user.id == admin.id:
+        if admin.id == id:
             return jsonify({
                 'status': 'error',
                 'message': 'Cannot delete yourself'
             }), 400
         
-        # Get user data before deletion
-        user_data = {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email
-        }
-        
-        # Delete user
-        db.session.delete(user)
-        db.session.commit()
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'User {user.username} deleted successfully',
-            'data': user_data
-        })
+        # Call UserController delete
+        from app.controllers.UserController import delete
+        return delete(id)
         
     except Exception as e:
-        db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Error deleting user: {str(e)}'
+            'message': f'Delete user error: {str(e)}'
         }), 500
 
 # === PRODUCT ROUTES ===
 @bp.route('/products', methods=['GET'])
 def get_products():
-    """Get all products"""
     try:
-        products = Product.query.filter_by(is_active=True).all()
-        
-        products_data = []
-        for product in products:
-            # Get stock information
-            stock = Stock.query.filter_by(product_id=product.id).first()
-            
-            product_data = {
-                'id': product.id,
-                'name': product.name,
-                'description': product.description,
-                'price': float(product.price) if product.price else 0,
-                'category': product.category or 'Uncategorized',
-                'image_url': product.image_url or '/static/images/default-product.jpg',
-                'stock': stock.quantity if stock else 0,
-                'is_active': product.is_active,
-                'created_at': product.created_at.isoformat() if product.created_at else None
-            }
-            
-            # Add optional fields
-            if hasattr(product, 'original_price') and product.original_price:
-                product_data['original_price'] = float(product.original_price)
-                product_data['is_discounted'] = product.original_price > product.price
-                if product_data['is_discounted']:
-                    discount = ((product.original_price - product.price) / product.original_price) * 100
-                    product_data['discount_percentage'] = round(discount, 1)
-            
-            if hasattr(product, 'weight'):
-                product_data['weight'] = product.weight
-            if hasattr(product, 'origin'):
-                product_data['origin'] = product.origin
-            if hasattr(product, 'sold_count'):
-                product_data['sold_count'] = product.sold_count
-            
-            products_data.append(product_data)
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Found {len(products_data)} products',
-            'data': products_data,
-            'count': len(products_data)
-        })
-        
+        # Call ProductController index
+        from app.controllers.ProductController import index
+        return index()
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Error getting products: {str(e)}'
+            'message': f'Get products error: {str(e)}'
         }), 500
 
 @bp.route('/products/<int:id>', methods=['GET'])
 def get_product(id):
-    """Get single product by ID"""
     try:
-        product = Product.query.get(id)
-        
-        if not product or not product.is_active:
-            return jsonify({
-                'status': 'error',
-                'message': f'Product with ID {id} not found'
-            }), 404
-        
-        # Get stock
-        stock = Stock.query.filter_by(product_id=product.id).first()
-        
-        product_data = {
-            'id': product.id,
-            'name': product.name,
-            'description': product.description,
-            'price': float(product.price) if product.price else 0,
-            'category': product.category or 'Uncategorized',
-            'image_url': product.image_url or '/static/images/default-product.jpg',
-            'stock': stock.quantity if stock else 0,
-            'min_stock': stock.min_stock if stock else 10,
-            'is_active': product.is_active,
-            'created_at': product.created_at.isoformat() if product.created_at else None
-        }
-        
-        # Add all available attributes
-        optional_fields = [
-            'original_price', 'weight', 'origin', 'roast_level', 
-            'flavor_notes', 'brewing_methods', 'sold_count', 'rating',
-            'review_count', 'is_featured', 'long_description'
-        ]
-        
-        for field in optional_fields:
-            if hasattr(product, field) and getattr(product, field):
-                value = getattr(product, field)
-                if field == 'original_price':
-                    product_data[field] = float(value)
-                    product_data['is_discounted'] = value > product.price
-                    if product_data['is_discounted']:
-                        discount = ((value - product.price) / value) * 100
-                        product_data['discount_percentage'] = round(discount, 1)
-                else:
-                    product_data[field] = value
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Product found',
-            'data': product_data
-        })
-        
+        from app.controllers.ProductController import show
+        return show(id)
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Error getting product: {str(e)}'
+            'message': f'Get product error: {str(e)}'
         }), 500
 
 @bp.route('/products', methods=['POST'])
 def create_product():
-    """Create new product (admin only)"""
     try:
         # Check admin access
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'Authentication required'
+                'message': 'X-User-ID header is required'
             }), 401
         
+        from app.models.user import User
         user = User.query.get(int(user_id))
         if not user or not user.is_admin:
             return jsonify({
@@ -636,97 +325,28 @@ def create_product():
                 'message': 'Admin access required'
             }), 403
         
-        data = request.json
-        
-        # Validate required fields
-        required_fields = ['name', 'price']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({
-                    'status': 'error',
-                    'message': f'{field.title()} is required'
-                }), 400
-        
-        # Create product
-        new_product = Product(
-            name=data['name'],
-            description=data.get('description', ''),
-            price=float(data['price']),
-            category=data.get('category', 'Uncategorized'),
-            image_url=data.get('image_url', '/static/images/default-product.jpg'),
-            is_active=True
-        )
-        
-        # Add optional fields
-        optional_fields = [
-            'original_price', 'weight', 'origin', 'roast_level',
-            'flavor_notes', 'brewing_methods', 'long_description', 'is_featured'
-        ]
-        
-        for field in optional_fields:
-            if field in data:
-                if field == 'original_price' and data[field]:
-                    setattr(new_product, field, float(data[field]))
-                else:
-                    setattr(new_product, field, data[field])
-        
-        db.session.add(new_product)
-        db.session.flush()  # Get product ID without committing
-        
-        # Create stock entry
-        stock_quantity = data.get('stock', 0)
-        stock = Stock(
-            product_id=new_product.id,
-            quantity=stock_quantity,
-            min_stock=data.get('min_stock', 10)
-        )
-        db.session.add(stock)
-        
-        db.session.commit()
-        
-        # Prepare response
-        product_data = {
-            'id': new_product.id,
-            'name': new_product.name,
-            'description': new_product.description,
-            'price': float(new_product.price),
-            'category': new_product.category,
-            'image_url': new_product.image_url,
-            'stock': stock_quantity,
-            'min_stock': stock.min_stock,
-            'is_active': new_product.is_active,
-            'created_at': new_product.created_at.isoformat() if new_product.created_at else None
-        }
-        
-        for field in optional_fields:
-            if hasattr(new_product, field) and getattr(new_product, field):
-                product_data[field] = getattr(new_product, field)
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Product created successfully',
-            'data': product_data
-        }), 201
+        # Call ProductController store
+        from app.controllers.ProductController import store
+        return store()
         
     except Exception as e:
-        db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Error creating product: {str(e)}'
+            'message': f'Create product error: {str(e)}'
         }), 500
 
 @bp.route('/products/<int:id>', methods=['PUT'])
 def update_product(id):
-    """Update product (admin only)"""
     try:
         # Check admin access
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'Authentication required'
+                'message': 'X-User-ID header is required'
             }), 401
         
+        from app.models.user import User
         user = User.query.get(int(user_id))
         if not user or not user.is_admin:
             return jsonify({
@@ -734,101 +354,28 @@ def update_product(id):
                 'message': 'Admin access required'
             }), 403
         
-        product = Product.query.get(id)
-        if not product:
-            return jsonify({
-                'status': 'error',
-                'message': f'Product with ID {id} not found'
-            }), 404
-        
-        data = request.json
-        if not data:
-            return jsonify({
-                'status': 'error',
-                'message': 'No data provided'
-            }), 400
-        
-        # Update product fields
-        updated = False
-        product_fields = ['name', 'description', 'price', 'category', 'image_url',
-                         'original_price', 'weight', 'origin', 'roast_level',
-                         'flavor_notes', 'brewing_methods', 'long_description',
-                         'is_featured', 'is_active']
-        
-        for field in product_fields:
-            if field in data:
-                if field == 'price' and data[field] is not None:
-                    setattr(product, field, float(data[field]))
-                elif field == 'original_price' and data[field] is not None:
-                    setattr(product, field, float(data[field]))
-                else:
-                    setattr(product, field, data[field])
-                updated = True
-        
-        # Update stock if provided
-        stock = Stock.query.filter_by(product_id=id).first()
-        if stock and 'stock' in data:
-            stock.quantity = data['stock']
-            updated = True
-        
-        if 'min_stock' in data and stock:
-            stock.min_stock = data['min_stock']
-            updated = True
-        
-        if updated:
-            product.updated_at = datetime.utcnow()
-            db.session.commit()
-        
-        # Get updated stock info
-        stock = Stock.query.filter_by(product_id=id).first()
-        
-        # Prepare response
-        product_data = {
-            'id': product.id,
-            'name': product.name,
-            'description': product.description,
-            'price': float(product.price) if product.price else 0,
-            'category': product.category,
-            'image_url': product.image_url,
-            'stock': stock.quantity if stock else 0,
-            'min_stock': stock.min_stock if stock else 10,
-            'is_active': product.is_active,
-            'updated_at': product.updated_at.isoformat() if product.updated_at else None
-        }
-        
-        if hasattr(product, 'original_price') and product.original_price:
-            product_data['original_price'] = float(product.original_price)
-            product_data['is_discounted'] = product.original_price > product.price
-            if product_data['is_discounted']:
-                discount = ((product.original_price - product.price) / product.original_price) * 100
-                product_data['discount_percentage'] = round(discount, 1)
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Product updated successfully' if updated else 'No changes made',
-            'data': product_data,
-            'updated': updated
-        })
+        # Call ProductController update
+        from app.controllers.ProductController import update
+        return update(id)
         
     except Exception as e:
-        db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Error updating product: {str(e)}'
+            'message': f'Update product error: {str(e)}'
         }), 500
 
 @bp.route('/products/<int:id>', methods=['DELETE'])
 def delete_product(id):
-    """Delete product (admin only - soft delete)"""
     try:
         # Check admin access
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'Authentication required'
+                'message': 'X-User-ID header is required'
             }), 401
         
+        from app.models.user import User
         user = User.query.get(int(user_id))
         if not user or not user.is_admin:
             return jsonify({
@@ -836,48 +383,17 @@ def delete_product(id):
                 'message': 'Admin access required'
             }), 403
         
-        product = Product.query.get(id)
-        if not product:
-            return jsonify({
-                'status': 'error',
-                'message': f'Product with ID {id} not found'
-            }), 404
-        
-        # Soft delete (set is_active to False)
-        if product.is_active:
-            product.is_active = False
-            product.updated_at = datetime.utcnow()
-            db.session.commit()
-            
-            return jsonify({
-                'status': 'success',
-                'message': f'Product "{product.name}" has been deactivated',
-                'data': {
-                    'id': product.id,
-                    'name': product.name,
-                    'is_active': False,
-                    'deactivated_at': product.updated_at.isoformat()
-                }
-            })
-        else:
-            return jsonify({
-                'status': 'info',
-                'message': 'Product is already deactivated',
-                'data': {
-                    'id': product.id,
-                    'name': product.name,
-                    'is_active': False
-                }
-            })
+        # Call ProductController delete
+        from app.controllers.ProductController import delete
+        return delete(id)
         
     except Exception as e:
-        db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Error deleting product: {str(e)}'
+            'message': f'Delete product error: {str(e)}'
         }), 500
 
-# === ADMIN DASHBOARD ===
+# === ADMIN ROUTES ===
 @bp.route('/admin/dashboard', methods=['GET'])
 def admin_dashboard():
     try:
@@ -886,9 +402,10 @@ def admin_dashboard():
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'Authentication required'
+                'message': 'X-User-ID header is required'
             }), 401
         
+        from app.models.user import User
         user = User.query.get(int(user_id))
         if not user or not user.is_admin:
             return jsonify({
@@ -897,8 +414,18 @@ def admin_dashboard():
             }), 403
         
         # Get statistics
+        from app.models.product import Product
+        from app.models.transaction import Transaction
+        from app.models.stock import Stock
+        
         total_users = User.query.count()
-        total_products = Product.query.filter_by(is_active=True).count()
+        
+        # Perbaikan: Gunakan Product.query.count() tanpa filter is_active
+        try:
+            total_products = Product.query.count()  # Tanpa filter is_active
+        except:
+            total_products = Product.query.filter_by(is_available=True).count() if hasattr(Product, 'is_available') else Product.query.count()
+        
         total_transactions = Transaction.query.count()
         
         # Today's transactions
@@ -908,26 +435,16 @@ def admin_dashboard():
             Transaction.created_at >= today_start
         ).count()
         
-        # Low stock products
-        low_stocks = Stock.query.filter(Stock.quantity <= Stock.min_stock).count()
-        
-        # Recent transactions
-        recent_transactions = Transaction.query.order_by(
-            Transaction.created_at.desc()
-        ).limit(5).all()
-        
-        recent_transactions_data = []
-        for transaction in recent_transactions:
-            recent_transactions_data.append({
-                'id': transaction.id,
-                'transaction_code': transaction.transaction_code,
-                'user_id': transaction.user_id,
-                'total_amount': float(transaction.total_amount) if transaction.total_amount else 0,
-                'status': transaction.status,
-                'created_at': transaction.created_at.isoformat() if transaction.created_at else None
-            })
+        # Low stock products (handle error jika field tidak ada)
+        low_stocks = 0
+        try:
+            low_stocks = Stock.query.filter(Stock.quantity <= Stock.min_stock).count()
+        except:
+            # Jika min_stock tidak ada, skip
+            pass
         
         # Total revenue
+        from app import db
         total_revenue_result = db.session.query(db.func.sum(Transaction.total_amount)).scalar()
         total_revenue = float(total_revenue_result) if total_revenue_result else 0
         
@@ -949,10 +466,7 @@ def admin_dashboard():
         return jsonify({
             'status': 'success',
             'message': 'Admin dashboard data',
-            'data': {
-                'stats': stats,
-                'recent_transactions': recent_transactions_data
-            }
+            'data': stats
         })
         
     except Exception as e:
@@ -961,29 +475,23 @@ def admin_dashboard():
             'message': f'Dashboard error: {str(e)}'
         }), 500
 
-# === ADMIN SPECIFIC ENDPOINTS ===
 @bp.route('/admin/users', methods=['GET'])
 def admin_get_users():
-    """Get all users (admin only) - same as /users but for admin panel"""
+    """Admin view of all users"""
     return get_users()
-
-@bp.route('/admin/products', methods=['POST'])
-def admin_create_product():
-    """Create product (admin only) - same as /products"""
-    return create_product()
 
 @bp.route('/admin/transactions', methods=['GET'])
 def admin_get_transactions():
-    """Get all transactions (admin only)"""
     try:
         # Check admin access
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'Authentication required'
+                'message': 'X-User-ID header is required'
             }), 401
         
+        from app.models.user import User
         user = User.query.get(int(user_id))
         if not user or not user.is_admin:
             return jsonify({
@@ -992,6 +500,7 @@ def admin_get_transactions():
             }), 403
         
         # Get all transactions
+        from app.models.transaction import Transaction
         transactions = Transaction.query.order_by(
             Transaction.created_at.desc()
         ).all()
@@ -1028,22 +537,20 @@ def admin_get_transactions():
             'message': f'Error getting transactions: {str(e)}'
         }), 500
 
-# === CART ROUTES (keep as is from your original code) ===
-# [All your existing cart routes remain the same]
-# Just change response format to match new structure
-
+# === CART ROUTES (Keep your existing cart routes) ===
 @bp.route('/cart', methods=['GET'])
 def get_cart():
     try:
         from app.models.cart import Cart, CartItem
         from app.models.product import Product
+        from app import response
         
         # Get user ID from header
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
                 'status': 'error',
-                'message': 'Authentication required'
+                'message': 'X-User-ID header required'
             }), 401
         
         cart = Cart.query.filter_by(user_id=int(user_id)).first()
@@ -1065,7 +572,7 @@ def get_cart():
         
         for item in items:
             product = Product.query.get(item.product_id)
-            if product and product.is_active:
+            if product:  # HAPUS pengecekan 'is_active'
                 item_total = float(product.price) * item.quantity
                 total += item_total
                 cart_data.append({
@@ -1075,7 +582,7 @@ def get_cart():
                     'price': float(product.price),
                     'quantity': item.quantity,
                     'subtotal': item_total,
-                    'image_url': product.image_url
+                    'image_url': product.image_url if hasattr(product, 'image_url') else None
                 })
         
         return jsonify({
@@ -1096,108 +603,179 @@ def get_cart():
             'message': f'Get cart error: {str(e)}'
         }), 500
 
-# [Keep all other cart routes with similar response format updates]
-
-# === SEED DATA FOR TESTING ===
-@bp.route('/seed', methods=['POST'])
-def seed_data():
-    """Seed database with test data"""
+@bp.route('/cart/add', methods=['POST'])
+def add_to_cart():
     try:
-        # Check if already seeded
-        if User.query.count() > 0:
+        from app.models.cart import Cart, CartItem
+        from app.models.product import Product
+        from app import response, db
+        
+        # Get user ID from header
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
             return jsonify({
-                'status': 'info',
-                'message': 'Database already has data'
+                'status': 'error',
+                'message': 'X-User-ID header required'
+            }), 401
+        
+        data = request.json
+        product_id = data.get('product_id')
+        quantity = data.get('quantity', 1)
+        
+        if not product_id:
+            return jsonify({
+                'status': 'error',
+                'message': "Product ID required"
+            }), 400
+        
+        if quantity <= 0:
+            return jsonify({
+                'status': 'error',
+                'message': "Quantity must be greater than 0"
+            }), 400
+        
+        # Check product exists
+        product = Product.query.get(product_id)
+        if not product:
+            return jsonify({
+                'status': 'error',
+                'message': "Product not found"
+            }), 404
+        
+        # PERBAIKAN: Cek ketersediaan product
+        # Cek apakah product memiliki attribute is_active atau is_available
+        product_unavailable = False
+        
+        if hasattr(product, 'is_active'):
+            if not product.is_active:
+                product_unavailable = True
+        elif hasattr(product, 'is_available'):
+            if not product.is_available:
+                product_unavailable = True
+        # Jika tidak ada attribute status, anggap product available
+        
+        if product_unavailable:
+            return jsonify({
+                'status': 'error',
+                'message': f"Product {product.name} is not available"
+            }), 400
+        
+        # Get or create cart
+        cart = Cart.query.filter_by(user_id=int(user_id)).first()
+        if not cart:
+            cart = Cart(user_id=int(user_id))
+            db.session.add(cart)
+            db.session.flush()
+        
+        # Check if item already in cart
+        cart_item = CartItem.query.filter_by(
+            cart_id=cart.id, 
+            product_id=product_id
+        ).first()
+        
+        if cart_item:
+            cart_item.quantity += quantity
+        else:
+            cart_item = CartItem(
+                cart_id=cart.id,
+                product_id=product_id,
+                quantity=quantity
+            )
+            db.session.add(cart_item)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f"Added {quantity} x {product.name} to cart",
+            'data': {
+                'cart_id': cart.id,
+                'product_id': product_id,
+                'product_name': product.name,
+                'quantity': cart_item.quantity,
+                'subtotal': float(product.price) * cart_item.quantity
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Add to cart error: {str(e)}'
+        }), 500
+
+# === UPDATE CART ITEM ===   
+@bp.route('/cart/update/<int:item_id>', methods=['PUT'])
+def update_cart_item(item_id):
+    try:
+        from app.models.cart import CartItem, Cart
+        from app.models.product import Product
+        from app import response, db
+        
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'message': "X-User-ID header required"
+            }), 401
+        
+        data = request.json
+        quantity = data.get('quantity')
+        
+        if quantity is None:
+            return jsonify({
+                'status': 'error',
+                'message': "Quantity required"
+            }), 400
+        
+        # Find cart item
+        cart_item = CartItem.query.get(item_id)
+        if not cart_item:
+            return jsonify({
+                'status': 'error',
+                'message': "Cart item not found"
+            }), 404
+        
+        # Verify cart belongs to user
+        cart = Cart.query.get(cart_item.cart_id)
+        if not cart or cart.user_id != int(user_id):
+            return jsonify({
+                'status': 'error',
+                'message': "Unauthorized"
+            }), 403
+        
+        if quantity <= 0:
+            # Remove item if quantity is 0 or negative
+            db.session.delete(cart_item)
+            db.session.commit()
+            return jsonify({
+                'status': 'success',
+                'message': "Item removed from cart"
             })
         
-        # Create admin user
-        admin = User(
-            username='admin',
-            email='admin@kopi.com',
-            password='admin123',  # Should be hashed in production
-            full_name='Admin Kopi',
-            phone='081234567890',
-            address='Jl. Kopi No. 123, Jakarta',
-            is_admin=True,
-            is_verified=True
-        )
+        # Check stock
+        product = Product.query.get(cart_item.product_id)
+        if not product:
+            return jsonify({
+                'status': 'error',
+                'message': "Product not found"
+            }), 404
         
-        # Create regular user
-        customer = User(
-            username='customer',
-            email='customer@email.com',
-            password='customer123',
-            full_name='Budi Santoso',
-            phone='081298765432',
-            address='Jl. Merdeka No. 45, Bandung',
-            is_admin=False,
-            is_verified=True
-        )
-        
-        db.session.add(admin)
-        db.session.add(customer)
-        db.session.flush()
-        
-        # Create products
-        products = [
-            Product(
-                name='Kopi Arabica Gayo',
-                description='Kopi premium dari Gayo, Aceh dengan aroma floral',
-                price=125000,
-                original_price=150000,
-                category='Arabica',
-                image_url='https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&h=300&fit=crop',
-                weight='250g',
-                origin='Gayo, Aceh',
-                roast_level='Medium',
-                flavor_notes='Floral, Chocolate, Citrus',
-                is_featured=True,
-                is_active=True
-            ),
-            Product(
-                name='Kopi Robusta Lampung',
-                description='Kopi kuat dengan cita rasa earthy dan crema yang tebal',
-                price=85000,
-                category='Robusta',
-                image_url='https://images.unsplash.com/photo-1511537190424-bbbab87ac5eb?w=400&h=300&fit=crop',
-                weight='250g',
-                origin='Lampung',
-                roast_level='Dark',
-                flavor_notes='Earthy, Nutty, Dark Chocolate',
-                is_active=True
-            )
-        ]
-        
-        for product in products:
-            db.session.add(product)
-        
-        db.session.flush()
-        
-        # Create stocks
-        for i, product in enumerate(products):
-            stock = Stock(
-                product_id=product.id,
-                quantity=[50, 100][i],  # Different quantities
-                min_stock=10
-            )
-            db.session.add(stock)
-        
+        # Update quantity
+        cart_item.quantity = quantity
         db.session.commit()
+        
+        # Calculate new subtotal
+        subtotal = float(product.price) * quantity
         
         return jsonify({
             'status': 'success',
-            'message': 'Database seeded with test data',
+            'message': "Cart item updated",
             'data': {
-                'users_created': 2,
-                'products_created': 2,
-                'admin_credentials': {
-                    'email': 'admin@kopi.com',
-                    'password': 'admin123'
-                },
-                'customer_credentials': {
-                    'email': 'customer@email.com',
-                    'password': 'customer123'
-                }
+                'item_id': cart_item.id,
+                'product_id': cart_item.product_id,
+                'product_name': product.name if hasattr(product, 'name') else 'Unknown',
+                'quantity': cart_item.quantity,
+                'subtotal': subtotal
             }
         })
         
@@ -1205,39 +783,15 @@ def seed_data():
         db.session.rollback()
         return jsonify({
             'status': 'error',
-            'message': f'Error seeding database: {str(e)}'
+            'message': f'Update cart error: {str(e)}'
         }), 500
 
-# === RESET DATABASE ===
-@bp.route('/reset', methods=['DELETE'])
-def reset_database():
-    """Reset database (for testing only)"""
-    try:
-        # Clear all tables (in correct order to avoid foreign key constraints)
-        CartItem.query.delete()
-        Cart.query.delete()
-        TransactionItem.query.delete()
-        Transaction.query.delete()
-        Stock.query.delete()
-        Product.query.delete()
-        User.query.delete()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Database reset successfully',
-            'data': {
-                'tables_cleared': [
-                    'users', 'products', 'stocks', 'transactions',
-                    'transaction_items', 'carts', 'cart_items'
-                ]
-            }
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': f'Error resetting database: {str(e)}'
-        }), 500
+# === HEALTH CHECK ===
+@bp.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'success',
+        'message': 'API is healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'database': 'connected'  # Add actual DB check if needed
+    })

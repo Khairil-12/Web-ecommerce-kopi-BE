@@ -31,6 +31,7 @@ def store():
         password = request.json.get('password')
         phone = request.json.get('phone', '')
         address = request.json.get('address', '')
+        is_admin = request.json.get('is_admin', False)  # TAMBAH INI
         
         # Check if user exists
         if User.query.filter_by(email=email).first():
@@ -46,6 +47,7 @@ def store():
             address=address
         )
         user.set_password(password)
+        user.is_admin = is_admin  # TAMBAH INI
         
         db.session.add(user)
         db.session.commit()
@@ -99,6 +101,7 @@ def transform(users):
             'username': user.username,
             'email': user.email,
             'phone': user.phone,
+            'address': user.address,  # TAMBAH INI
             'is_admin': user.is_admin,
             'created_at': user.created_at.isoformat() if user.created_at else None
         })

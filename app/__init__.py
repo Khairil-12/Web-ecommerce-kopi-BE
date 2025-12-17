@@ -23,6 +23,6 @@ def create_app():
     
     # Register blueprint dengan prefix '/api' jika mau
     from app.routes import bp
-    app.register_blueprint(bp)  # atau app.register_blueprint(bp, url_prefix='/api')
+    app.register_blueprint(bp)  
     
     return app

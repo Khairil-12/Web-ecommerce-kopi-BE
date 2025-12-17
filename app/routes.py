@@ -786,6 +786,97 @@ def update_cart_item(item_id):
             'message': f'Update cart error: {str(e)}'
         }), 500
 
+# === REMOVE CART ITEM ===
+@bp.route('/cart/remove/<int:item_id>', methods=['DELETE'])
+def remove_cart_item(item_id):
+    try:
+        from app.models.cart import CartItem, Cart
+        from app import db
+        
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Authentication required'
+            }), 401
+        
+        # Find cart item
+        cart_item = CartItem.query.get(item_id)
+        if not cart_item:
+            return jsonify({
+                'status': 'error',
+                'message': f'Cart item {item_id} not found'
+            }), 404
+        
+        # Verify cart belongs to user
+        cart = Cart.query.get(cart_item.cart_id)
+        if not cart or cart.user_id != int(user_id):
+            return jsonify({
+                'status': 'error',
+                'message': 'Unauthorized'
+            }), 403
+        
+        # Remove item
+        db.session.delete(cart_item)
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Item removed from cart',
+            'data': {
+                'removed_item_id': item_id,
+                'product_id': cart_item.product_id
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Remove from cart error: {str(e)}'
+        }), 500
+    
+# === CLEAR CART ===
+@bp.route('/cart/clear', methods=['DELETE'])
+def clear_cart():
+    try:
+        from app.models.cart import Cart, CartItem
+        from app import db
+        
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Authentication required'
+            }), 401
+        
+        cart = Cart.query.filter_by(user_id=int(user_id)).first()
+        if not cart:
+            return jsonify({
+                'status': 'success',
+                'message': 'Cart is already empty'
+            })
+        
+        # Delete all cart items
+        CartItem.query.filter_by(cart_id=cart.id).delete()
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Cart cleared successfully',
+            'data': {
+                'cart_id': cart.id,
+                'items_removed': True
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Clear cart error: {str(e)}'
+        }), 500
+
 # === HEALTH CHECK ===
 @bp.route('/health', methods=['GET'])
 def health_check():

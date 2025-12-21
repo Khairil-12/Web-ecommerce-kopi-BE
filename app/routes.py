@@ -670,6 +670,94 @@ def admin_get_transactions():
             'message': f'Error getting transactions: {str(e)}'
         }), 500
 
+# === CUSTOMER DASHBOARD ===
+@bp.route('/customer/dashboard', methods=['GET'])
+def customer_dashboard():
+    try:
+        # Require authenticated customer (non-admin)
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'X-User-ID header is required'
+            }), 401
+
+        from app.models.user import User
+        from app.models.transaction import Transaction
+        from app.models.cart import Cart, CartItem
+        from app import db
+        from app.models.product import Product
+
+        user = User.query.get(int(user_id))
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid user'
+            }), 401
+
+        if user.is_admin:
+            return jsonify({
+                'status': 'error',
+                'message': 'Customer access required'
+            }), 403
+
+        # Customer-scoped stats
+        total_orders = Transaction.query.filter_by(user_id=user.id).count()
+
+        total_spent_result = db.session.query(db.func.sum(Transaction.total_amount)).filter(Transaction.user_id == user.id).scalar()
+        total_spent = float(total_spent_result) if total_spent_result else 0
+
+        recent = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).limit(5).all()
+        recent_list = []
+        for t in recent:
+            recent_list.append({
+                'id': t.id,
+                'transaction_code': t.transaction_code,
+                'total_amount': float(t.total_amount) if t.total_amount else 0,
+                'status': t.status,
+                'created_at': t.created_at.isoformat() if t.created_at else None
+            })
+
+        # Cart summary
+        cart = Cart.query.filter_by(user_id=user.id).first()
+        item_count = 0
+        cart_total = 0
+        if cart:
+            items = CartItem.query.filter_by(cart_id=cart.id).all()
+            item_count = sum(i.quantity for i in items)
+            for i in items:
+                p = Product.query.get(i.product_id)
+                if p and hasattr(p, 'price'):
+                    cart_total += float(p.price) * i.quantity
+
+        data = {
+            'customer': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email
+            },
+            'total_orders': total_orders,
+            'total_spent': total_spent,
+            'recent_transactions': recent_list,
+            'cart': {
+                'item_count': item_count,
+                'cart_total': cart_total
+            },
+            'dashboard_updated': datetime.utcnow().isoformat()
+        }
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Customer dashboard data',
+            'data': data
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Customer dashboard error: {str(e)}'
+        }), 500
+
 # === CART ROUTES (Keep your existing cart routes) ===
 @bp.route('/cart', methods=['GET'])
 def get_cart():

@@ -3,6 +3,10 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from app.config import Config
+try:
+    from flask_cors import CORS
+except Exception:
+    CORS = None
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -10,6 +14,10 @@ migrate = Migrate()
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config())
+    # Enable CORS if flask_cors is available. This allows the frontend
+    # (including file:// origins which appear as 'null') to call the API.
+    if CORS:
+        CORS(app, resources={r"/*": {"origins": "*"}})
     
     db.init_app(app)
     migrate.init_app(app, db)
@@ -21,8 +29,8 @@ def create_app():
     from app.models.transaction import Transaction, TransactionItem
     from app.models.cart import Cart, CartItem
     
-    # Register blueprint dengan prefix '/api' jika mau
+    # Register API blueprint under '/api' so frontend using '/api/...' works
     from app.routes import bp
-    app.register_blueprint(bp)  
+    app.register_blueprint(bp, url_prefix='/api')
     
     return app

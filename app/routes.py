@@ -67,23 +67,30 @@ def test():
         }
     })
 
-# === LOGIN (Updated based on your controller) ===
+# === LOGIN (Updated based controller) ===
 @bp.route('/login', methods=['POST'])
 def login():
     try:
-        # Call UserController's store function for login logic
         from app.models.user import User
         from app import response
         
         data = request.json
-        if not data or 'email' not in data or 'password' not in data:
+        # Accept either email or username for login
+        if not data or 'password' not in data or ('email' not in data and 'username' not in data):
             return jsonify({
-                'status': 'error',
-                'message': 'Email and password are required'
+                'success': False,
+                'message': 'Email/username and password are required'
             }), 400
-        
-        user = User.query.filter_by(email=data['email']).first()
-        
+
+        identifier = data.get('email') or data.get('username')
+
+        # Try to find by email first, then by username
+        user = None
+        if data.get('email'):
+            user = User.query.filter_by(email=data.get('email')).first()
+        else:
+            user = User.query.filter_by(username=data.get('username')).first()
+
         if user and user.check_password(data['password']):
             user_data = {
                 'id': user.id,
@@ -93,34 +100,33 @@ def login():
                 'is_admin': user.is_admin,
                 'created_at': user.created_at.isoformat() if user.created_at else None
             }
-            
-            # Add address if exists
+
             if hasattr(user, 'address') and user.address:
                 user_data['address'] = user.address
-            
+
+            # Return shape compatible with frontend (expects `success` and `user`)
             return jsonify({
-                'status': 'success',
+                'success': True,
                 'message': 'Login successful',
-                'data': user_data,
+                'user': user_data,
                 'token': f'mock-jwt-token-{user.id}'
             })
         else:
             return jsonify({
-                'status': 'error',
-                'message': 'Invalid email or password'
+                'success': False,
+                'message': 'Invalid email/username or password'
             }), 401
             
     except Exception as e:
         return jsonify({
-            'status': 'error',
+            'success': False,
             'message': f'Login error: {str(e)}'
         }), 500
 
-# === USER ROUTES (using your UserController) ===
+# === USER ROUTES (using UserController) ===
 @bp.route('/users', methods=['GET'])
 def get_users():
     try:
-        # Check admin access
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
@@ -158,6 +164,19 @@ def create_user():
         return jsonify({
             'status': 'error',
             'message': f'Create user error: {str(e)}'
+        }), 500
+
+
+# Convenience endpoint for frontend register form
+@bp.route('/register', methods=['POST'])
+def register():
+    try:
+        # Reuse existing create_user logic
+        return create_user()
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Register error: {str(e)}'
         }), 500
 
 @bp.route('/users/<int:id>', methods=['GET'])
@@ -286,7 +305,6 @@ def delete_user(id):
 @bp.route('/products', methods=['GET'])
 def get_products():
     try:
-        # Call ProductController index
         from app.controllers.ProductController import index
         return index()
     except Exception as e:
@@ -388,18 +406,14 @@ def delete_product(id):
         elif hasattr(product, 'is_available'):
             product.is_available = False
         else:
-            # Jika tidak ada attribute status, tambahkan field deleted_at
             if hasattr(product, 'deleted_at'):
                 product.deleted_at = datetime.utcnow()
             else:
-                # Simpan nama untuk audit lalu hard delete
                 product_name = product.name
-                # Hapus stock terlebih dahulu
                 from app.models.stock import Stock
                 stock = Stock.query.filter_by(product_id=id).first()
                 if stock:
                     db.session.delete(stock)
-                # Hapus product
                 db.session.delete(product)
                 db.session.commit()
                 
@@ -542,7 +556,7 @@ def admin_dashboard():
         
         # Perbaikan: Gunakan Product.query.count() tanpa filter is_active
         try:
-            total_products = Product.query.count()  # Tanpa filter is_active
+            total_products = Product.query.count()  
         except:
             total_products = Product.query.filter_by(is_available=True).count() if hasattr(Product, 'is_available') else Product.query.count()
         
@@ -555,12 +569,11 @@ def admin_dashboard():
             Transaction.created_at >= today_start
         ).count()
         
-        # Low stock products (handle error jika field tidak ada)
+        # Low stock products 
         low_stocks = 0
         try:
             low_stocks = Stock.query.filter(Stock.quantity <= Stock.min_stock).count()
         except:
-            # Jika min_stock tidak ada, skip
             pass
         
         # Total revenue

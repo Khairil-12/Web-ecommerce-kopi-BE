@@ -4,3 +4,4 @@ flask-migrate==4.0.5
 pymysql==1.1.0
 python-dotenv==1.0.0
 werkzeug==3.0.1
+Flask-Cors==3.0.10

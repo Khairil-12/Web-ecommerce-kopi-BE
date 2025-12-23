@@ -26,36 +26,62 @@ def show(id):
 
 def store():
     try:
-        name = request.json.get('name')
-        description = request.json.get('description', '')
-        price = request.json.get('price')
-        category = request.json.get('category')
-        image_url = request.json.get('image_url', '')
+        data = request.json
         
+        # Field required
+        name = data.get('name')
+        price = data.get('price')
+        category = data.get('category')
+        
+        if not all([name, price, category]):
+            return response.bad_request([], "Name, price, and category are required")
+        
+        # Create product dengan semua field
         product = Product(
             name=name,
-            description=description,
-            price=price,
+            description=data.get('description', ''),
+            price=float(price),
+            original_price=data.get('original_price'),
             category=category,
-            image_url=image_url
+            image_url=data.get('image_url', '/static/images/default-product.jpg'),
+            is_available=data.get('is_available', True),
+            
+            # Field baru untuk kopi
+            weight=data.get('weight'),
+            type=data.get('type'),
+            origin=data.get('origin'),
+            process=data.get('process'),
+            roast_level=data.get('roast_level'),
+            flavor_notes=data.get('flavor_notes'),
+            brewing_methods=data.get('brewing_methods'),
+            specifications=data.get('specifications'),
+            grade=data.get('grade'),
+            certification=data.get('certification'),
+            is_featured=data.get('is_featured', False)
         )
         
-        db.session.add(product)
-        db.session.flush()  # Get the product ID
+        # Hitung diskon otomatis
+        product.calculate_discount()
         
-        # Create stock for this product
+        db.session.add(product)
+        db.session.flush()  # Get product ID
+        
+        # Create stock entry
+        from app.models.stock import Stock
+        stock_quantity = data.get('stock', 0)
         stock = Stock(
             product_id=product.id,
-            quantity=request.json.get('stock_quantity', 0),
-            min_stock=request.json.get('min_stock', 10)
+            quantity=stock_quantity,
+            min_stock=data.get('min_stock', 10)
         )
         db.session.add(stock)
         
         db.session.commit()
+        
         return response.created([], "Product created successfully")
         
     except Exception as e:
-        print(e)
+        db.session.rollback()
         return response.server_error([], f"Error: {e}")
 
 def update(id):

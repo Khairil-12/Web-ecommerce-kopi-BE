@@ -1,5 +1,5 @@
 # app/__init__.py
-from flask import Flask
+from flask import Flask, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from app.config import Config
@@ -32,5 +32,10 @@ def create_app():
     # Register API blueprint under '/api' so frontend using '/api/...' works
     from app.routes import bp
     app.register_blueprint(bp, url_prefix='/api')
+
+    # Redirect root URL to the API root for convenience
+    @app.route('/')
+    def root_redirect():
+        return redirect('/api/')
     
     return app

@@ -121,6 +121,48 @@ def delete(id):
 def transform(products):
     array = []
     for product in products:
+        # normalize specifications into an array `specs` for frontend convenience
+        raw_specs = product.specifications
+        specs = []
+        try:
+            if raw_specs is None:
+                specs = []
+            elif isinstance(raw_specs, (list, tuple)):
+                specs = list(raw_specs)
+            else:
+                s = str(raw_specs).strip()
+                # try parse JSON array first
+                try:
+                    import json
+
+                    j = json.loads(s)
+                    if isinstance(j, list):
+                        specs = [str(x).strip() for x in j if str(x).strip()]
+                    else:
+                        specs = []
+                except Exception:
+                    # split on newlines, <br>, semicolon or pipe. Avoid splitting on comma (may be part of values)
+                    import re
+
+                    parts = re.split(r"\r?\n|<br\s*/?>|;|\|", s)
+                    specs = [p.strip() for p in parts if p and p.strip()]
+        except Exception:
+            specs = []
+
+        # build metadata from specs (e.g. 'Asal: Gayo' -> spec_meta['asal'] = 'Gayo')
+        spec_meta = {}
+        try:
+            for s in specs:
+                if not s or ':' not in s:
+                    continue
+                k, v = s.split(':', 1)
+                key = k.strip().lower().replace(' ', '_')
+                val = v.strip()
+                if key:
+                    spec_meta[key] = val
+        except Exception:
+            spec_meta = {}
+
         array.append({
             'id': product.id,
             'name': product.name,
@@ -129,11 +171,54 @@ def transform(products):
             'category': product.category,
             'image_url': product.image_url,
             'is_available': product.is_available,
-            'stock': product.stocks.quantity if product.stocks else 0
+            'stock': product.stocks.quantity if product.stocks else 0,
+            'specifications': product.specifications,
+            'specs': specs,
+            'spec_meta': spec_meta,
         })
     return array
 
 def single_transform(product):
+    # prepare specs array similar to transform()
+    raw_specs = product.specifications
+    specs = []
+    try:
+        if raw_specs is None:
+            specs = []
+        elif isinstance(raw_specs, (list, tuple)):
+            specs = list(raw_specs)
+        else:
+            s = str(raw_specs).strip()
+            try:
+                import json
+
+                j = json.loads(s)
+                if isinstance(j, list):
+                    specs = [str(x).strip() for x in j if str(x).strip()]
+                else:
+                    specs = []
+            except Exception:
+                import re
+
+                parts = re.split(r"\r?\n|<br\s*/?>|;|\|", s)
+                specs = [p.strip() for p in parts if p and p.strip()]
+    except Exception:
+        specs = []
+
+    # build metadata from specs
+    spec_meta = {}
+    try:
+        for s in specs:
+            if not s or ':' not in s:
+                continue
+            k, v = s.split(':', 1)
+            key = k.strip().lower().replace(' ', '_')
+            val = v.strip()
+            if key:
+                spec_meta[key] = val
+    except Exception:
+        spec_meta = {}
+
     return {
         'id': product.id,
         'name': product.name,
@@ -143,6 +228,9 @@ def single_transform(product):
         'image_url': product.image_url,
         'is_available': product.is_available,
         'stock': product.stocks.quantity if product.stocks else 0,
+        'specifications': product.specifications,
+        'specs': specs,
+        'spec_meta': spec_meta,
         'min_stock': product.stocks.min_stock if product.stocks else 10,
         'created_at': product.created_at.isoformat() if product.created_at else None
     }

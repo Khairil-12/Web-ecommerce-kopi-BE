@@ -375,7 +375,6 @@ def update_product(id):
 @bp.route('/products/<int:id>', methods=['DELETE'])
 def delete_product(id):
     try:
-        # Check admin access
         user_id = request.headers.get('X-User-ID')
         if not user_id:
             return jsonify({
@@ -669,6 +668,62 @@ def admin_get_transactions():
             'status': 'error',
             'message': f'Error getting transactions: {str(e)}'
         }), 500
+
+
+@bp.route('/transactions/<int:transaction_id>', methods=['GET'])
+def get_transaction_detail(transaction_id):
+    """Return a single transaction and its items. Accessible by owner or admin."""
+    try:
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return jsonify({'status': 'error', 'message': 'X-User-ID header is required'}), 401
+
+        from app.models.user import User
+        from app.models.transaction import Transaction, TransactionItem
+        from app.models.product import Product
+
+        user = User.query.get(int(user_id))
+        if not user:
+            return jsonify({'status': 'error', 'message': 'Invalid user'}), 401
+
+        txn = Transaction.query.get(transaction_id)
+        if not txn:
+            return jsonify({'status': 'error', 'message': 'Transaction not found'}), 404
+
+        # Only admin or owner can view
+        if not user.is_admin and txn.user_id != int(user_id):
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
+        items = []
+        for it in txn.items:
+            prod = Product.query.get(it.product_id)
+            items.append({
+                'id': it.id,
+                'product_id': it.product_id,
+                'product_name': prod.name if prod else None,
+                'image_url': getattr(prod, 'image_url', None) if prod else None,
+                'quantity': it.quantity,
+                'price': float(it.price) if it.price else 0,
+                'subtotal': float(it.subtotal) if it.subtotal else 0
+            })
+
+        txn_data = {
+            'id': txn.id,
+            'transaction_code': txn.transaction_code,
+            'user_id': txn.user_id,
+            'total_amount': float(txn.total_amount) if txn.total_amount else 0,
+            'status': txn.status,
+            'payment_method': txn.payment_method,
+            'shipping_address': txn.shipping_address,
+            'notes': txn.notes,
+            'created_at': txn.created_at.isoformat() if txn.created_at else None,
+            'items': items
+        }
+
+        return jsonify({'status': 'success', 'message': 'Transaction found', 'data': txn_data})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error fetching transaction: {str(e)}'}), 500
 
 # === CUSTOMER DASHBOARD ===
 @bp.route('/customer/dashboard', methods=['GET'])

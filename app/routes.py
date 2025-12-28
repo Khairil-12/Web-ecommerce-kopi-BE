@@ -31,11 +31,13 @@ def test():
             '5. POST /login - Login as customer',
             '6. Save customer ID from response',
             '7. Use admin ID in header (X-User-ID) to create products',
-            '8. Use customer ID to test cart functionality'
+            '8. Use customer ID to test cart functionality',
+            '9. POST /logout - Logout current user'
         ],
         'endpoints': {
             'AUTH': [
                 'POST /login - Login',
+                'POST /logout - Logout current user',
                 'POST /users - Register'
             ],
             'USERS': [
@@ -179,6 +181,43 @@ def register():
             'message': f'Register error: {str(e)}'
         }), 500
 
+@bp.route('/logout', methods=['POST'])
+def logout():
+    """
+    Logout endpoint - Clear user session/token on server side
+    Note: For JWT implementation, you would typically blacklist the token
+    For now, we'll just provide a success response for client-side cleanup
+    """
+    try:
+        user_id = request.headers.get('X-User-ID')
+        
+        if not user_id:
+            return jsonify({
+                'status': 'success',
+                'message': 'Logged out (no active session)'
+            })
+        
+        from app.models.user import User
+        user = User.query.get(int(user_id))
+        
+        if user:
+            print(f"User {user.username} (ID: {user.id}) logged out at {datetime.utcnow()}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Successfully logged out',
+            'timestamp': datetime.utcnow().isoformat(),
+            'note': 'Client should clear localStorage and redirect to login page'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'success',
+            'message': 'Logout completed',
+            'error_note': str(e) if str(e) else None,
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+    
 @bp.route('/users/<int:id>', methods=['GET'])
 def get_user(id):
     try:

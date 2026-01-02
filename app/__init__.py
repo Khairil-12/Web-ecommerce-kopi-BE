@@ -14,8 +14,6 @@ migrate = Migrate()
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config())
-    # Enable CORS if flask_cors is available. This allows the frontend
-    # (including file:// origins which appear as 'null') to call the API.
     if CORS:
         CORS(app, resources={r"/*": {"origins": "*"}})
     

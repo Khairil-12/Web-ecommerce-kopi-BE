@@ -38,119 +38,138 @@ def show(id):
 
 def store():
     try:
+        # Build list of allowed column names from model to avoid DB errors
+        allowed_cols = set([c.name for c in Product.__table__.columns])
+
         # Handle FormData (not JSON)
         if request.form:
-            # Field required
+            # Basic required fields
             name = request.form.get('name')
             price = request.form.get('price')
             category = request.form.get('category')
-            
             if not all([name, price, category]):
                 return response.bad_request([], "Name, price, and category are required")
-            
-            # Create product dengan semua field
-            product = Product(
-                name=name,
-                description=request.form.get('description', ''),
-                price=float(price) if price else 0,
-                original_price=float(request.form.get('original_price')) if request.form.get('original_price') else None,
-                category=category,
-                image_url='/static/images/default-product.jpg',  # Default
-                is_available=request.form.get('is_available', '1') == '1',
-                
-                # Field baru untuk kopi
-                weight=request.form.get('weight'),
-                type=request.form.get('type'),
-                origin=request.form.get('origin'),
-                process=request.form.get('process'),
-                roast_level=request.form.get('roast_level'),
-                flavor_notes=request.form.get('flavor_notes'),
-                brewing_methods=request.form.get('brewing_methods'),
-                specifications=request.form.get('specifications'),
-                grade=request.form.get('grade'),
-                certification=request.form.get('certification'),
-                is_featured=request.form.get('is_featured', '0') == '1',
-                is_discounted=request.form.get('is_discounted', '0') == '1',
-                discount_percentage=float(request.form.get('discount_percentage')) if request.form.get('discount_percentage') else 0,
-                rating=float(request.form.get('rating')) if request.form.get('rating') else None
-            )
-            
+
+            # Prepare kwargs only for allowed columns
+            kwargs = {}
+            def add_if_allowed(key, val):
+                if key in allowed_cols:
+                    kwargs[key] = val
+
+            add_if_allowed('name', name)
+            add_if_allowed('description', request.form.get('description', ''))
+            try:
+                add_if_allowed('price', float(price) if price else 0)
+            except Exception:
+                add_if_allowed('price', price)
+            add_if_allowed('original_price', float(request.form.get('original_price')) if request.form.get('original_price') else None)
+            add_if_allowed('category', category)
+            # default image_url only if column exists
+            if 'image_url' in allowed_cols:
+                kwargs.setdefault('image_url', '/static/images/default-product.jpg')
+            add_if_allowed('is_available', request.form.get('is_available', '1') == '1')
+
+            # additional optional fields
+            add_if_allowed('weight', request.form.get('weight'))
+            add_if_allowed('type', request.form.get('type'))
+            add_if_allowed('origin', request.form.get('origin'))
+            add_if_allowed('process', request.form.get('process'))
+            add_if_allowed('roast_level', request.form.get('roast_level'))
+            add_if_allowed('flavor_notes', request.form.get('flavor_notes'))
+            add_if_allowed('brewing_methods', request.form.get('brewing_methods'))
+            add_if_allowed('specifications', request.form.get('specifications'))
+            add_if_allowed('grade', request.form.get('grade'))
+            add_if_allowed('certification', request.form.get('certification'))
+            if 'is_featured' in allowed_cols:
+                add_if_allowed('is_featured', request.form.get('is_featured', '0') == '1')
+            if 'is_discounted' in allowed_cols:
+                add_if_allowed('is_discounted', request.form.get('is_discounted', '0') == '1')
+            if 'discount_percentage' in allowed_cols and request.form.get('discount_percentage'):
+                try:
+                    add_if_allowed('discount_percentage', float(request.form.get('discount_percentage')))
+                except Exception:
+                    pass
+            if 'rating' in allowed_cols and request.form.get('rating'):
+                try:
+                    add_if_allowed('rating', float(request.form.get('rating')))
+                except Exception:
+                    pass
+
+            product = Product(**kwargs)
             db.session.add(product)
-            db.session.flush()  # Get product ID
-            
+            db.session.flush()
+
             # Handle file upload
-            if 'image' in request.files:
+            if 'image' in request.files and 'image_url' in allowed_cols:
                 image = request.files['image']
                 if image and allowed_file(image.filename):
                     filename = secure_filename(f"{product.id}_{image.filename}")
-                    # Pastikan folder uploads exists
                     if not os.path.exists(UPLOAD_FOLDER):
                         os.makedirs(UPLOAD_FOLDER)
-                    
                     image_path = os.path.join(UPLOAD_FOLDER, filename)
                     image.save(image_path)
                     product.image_url = f'/static/uploads/products/{filename}'
-            
-            # Calculate discount
-            product.calculate_discount()
-            
-            # Create stock entry
-            stock_quantity = int(request.form.get('stock', 0))
+
+            # Calculate discount if available
+            if hasattr(product, 'calculate_discount'):
+                try:
+                    product.calculate_discount()
+                except Exception:
+                    pass
+
+            # Create stock entry if model exists
+            try:
+                stock_quantity = int(request.form.get('stock', 0))
+            except Exception:
+                stock_quantity = 0
             stock = Stock(
                 product_id=product.id,
                 quantity=stock_quantity,
                 min_stock=int(request.form.get('min_stock', 10))
             )
             db.session.add(stock)
-            
             db.session.commit()
-            
             return response.created([], "Product created successfully")
         else:
-            # Fallback to JSON if no FormData
+            # Fallback to JSON
             data = request.json
             if not data:
                 return response.bad_request([], "No data provided")
-            
-            # Field required
             name = data.get('name')
             price = data.get('price')
             category = data.get('category')
-            
             if not all([name, price, category]):
                 return response.bad_request([], "Name, price, and category are required")
-            
-            # Create product dengan semua field
-            product = Product(
-                name=name,
-                description=data.get('description', ''),
-                price=float(price),
-                original_price=data.get('original_price'),
-                category=category,
-                image_url=data.get('image_url', '/static/images/default-product.jpg'),
-                is_available=data.get('is_available', True),
-                
-                # Field baru untuk kopi
-                weight=data.get('weight'),
-                type=data.get('type'),
-                origin=data.get('origin'),
-                process=data.get('process'),
-                roast_level=data.get('roast_level'),
-                flavor_notes=data.get('flavor_notes'),
-                brewing_methods=data.get('brewing_methods'),
-                specifications=data.get('specifications'),
-                grade=data.get('grade'),
-                certification=data.get('certification'),
-                is_featured=data.get('is_featured', False)
-            )
-            
-            # Hitung diskon otomatis
-            product.calculate_discount()
-            
+
+            allowed_cols = set([c.name for c in Product.__table__.columns])
+            kwargs = {}
+            def add_if_allowed_json(key, val):
+                if key in allowed_cols and val is not None:
+                    kwargs[key] = val
+
+            add_if_allowed_json('name', name)
+            add_if_allowed_json('description', data.get('description', ''))
+            try:
+                add_if_allowed_json('price', float(price))
+            except Exception:
+                add_if_allowed_json('price', price)
+            add_if_allowed_json('original_price', data.get('original_price'))
+            add_if_allowed_json('category', category)
+            add_if_allowed_json('image_url', data.get('image_url', '/static/images/default-product.jpg'))
+            add_if_allowed_json('is_available', data.get('is_available', True))
+            # optional fields
+            for fld in ['weight','type','origin','process','roast_level','flavor_notes','brewing_methods','specifications','grade','certification','is_featured']:
+                add_if_allowed_json(fld, data.get(fld))
+
+            product = Product(**kwargs)
+            if hasattr(product, 'calculate_discount'):
+                try:
+                    product.calculate_discount()
+                except Exception:
+                    pass
+
             db.session.add(product)
-            db.session.flush()  # Get product ID
-            
-            # Create stock entry
+            db.session.flush()
             stock_quantity = data.get('stock', 0)
             stock = Stock(
                 product_id=product.id,
@@ -158,9 +177,7 @@ def store():
                 min_stock=data.get('min_stock', 10)
             )
             db.session.add(stock)
-            
             db.session.commit()
-            
             return response.created([], "Product created successfully")
         
     except Exception as e:
@@ -172,117 +189,84 @@ def update(id):
         product = Product.query.filter_by(id=id).first()
         if not product:
             return response.not_found([], "Product not found")
-        
-        # Handle FormData (not JSON)
+        # Build allowed columns set
+        allowed_cols = set([c.name for c in Product.__table__.columns])
+
+        # If form data, update allowed fields from form
         if request.form:
-            # Update fields from FormData
-            if 'name' in request.form:
-                product.name = request.form['name']
-            if 'description' in request.form:
-                product.description = request.form['description']
-            if 'price' in request.form:
-                product.price = float(request.form['price']) if request.form['price'] else 0
-            if 'category' in request.form:
-                product.category = request.form['category']
-            if 'weight' in request.form:
-                product.weight = request.form['weight']
-            if 'type' in request.form:
-                product.type = request.form['type']
-            if 'origin' in request.form:
-                product.origin = request.form['origin']
-            if 'process' in request.form:
-                product.process = request.form['process']
-            if 'roast_level' in request.form:
-                product.roast_level = request.form['roast_level']
-            if 'flavor_notes' in request.form:
-                product.flavor_notes = request.form['flavor_notes']
-            if 'brewing_methods' in request.form:
-                product.brewing_methods = request.form['brewing_methods']
-            if 'specifications' in request.form:
-                product.specifications = request.form['specifications']
-            if 'grade' in request.form:
-                product.grade = request.form['grade']
-            if 'certification' in request.form:
-                product.certification = request.form['certification']
-            if 'is_featured' in request.form:
-                product.is_featured = request.form['is_featured'] == '1'
-            if 'is_available' in request.form:
-                product.is_available = request.form['is_available'] == '1'
-            if 'is_discounted' in request.form:
-                product.is_discounted = request.form['is_discounted'] == '1'
-            if 'discount_percentage' in request.form:
-                product.discount_percentage = float(request.form['discount_percentage']) if request.form['discount_percentage'] else 0
-            if 'rating' in request.form:
-                product.rating = float(request.form['rating']) if request.form['rating'] else None
-            if 'original_price' in request.form:
-                product.original_price = float(request.form['original_price']) if request.form['original_price'] else None
-            
-            # Handle file upload
-            if 'image' in request.files:
+            for key in request.form.keys():
+                if key in allowed_cols:
+                    val = request.form.get(key)
+                    # convert basic numeric fields
+                    if key in ('price', 'original_price', 'discount_percentage', 'rating'):
+                        try:
+                            if val is None or val == '':
+                                setattr(product, key, None)
+                            else:
+                                setattr(product, key, float(val))
+                        except Exception:
+                            setattr(product, key, val)
+                    elif key in ('is_featured', 'is_discounted', 'is_available'):
+                        setattr(product, key, val == '1')
+                    else:
+                        setattr(product, key, val)
+
+            # Handle file upload safely
+            if 'image' in request.files and 'image_url' in allowed_cols:
                 image = request.files['image']
                 if image and allowed_file(image.filename):
                     filename = secure_filename(f"{product.id}_{image.filename}")
-                    # Pastikan folder uploads exists
                     if not os.path.exists(UPLOAD_FOLDER):
                         os.makedirs(UPLOAD_FOLDER)
-                    
-                    # Hapus gambar lama jika ada
-                    if product.image_url and os.path.exists(product.image_url.replace('/static/', '')):
-                        try:
-                            os.remove(product.image_url.replace('/static/', ''))
-                        except:
-                            pass
-                    
+                    # attempt to remove old file if it's a local path
+                    try:
+                        old_path = None
+                        if product.image_url and product.image_url.startswith('/static/'):
+                            old_path = product.image_url.replace('/static/', '')
+                            if os.path.exists(old_path):
+                                os.remove(old_path)
+                    except Exception:
+                        pass
+
                     image_path = os.path.join(UPLOAD_FOLDER, filename)
                     image.save(image_path)
                     product.image_url = f'/static/uploads/products/{filename}'
-            
-            # Recalculate discount
-            product.calculate_discount()
-            
+
+            # Recalculate discount if available
+            if hasattr(product, 'calculate_discount'):
+                try:
+                    product.calculate_discount()
+                except Exception:
+                    pass
+
             product.updated_at = datetime.utcnow()
             db.session.commit()
-            
             return response.ok([], "Product updated successfully")
-        else:
-            # Fallback to JSON
-            data = request.json
-            if not data:
-                return response.bad_request([], "No data provided")
-            
-            product.name = data.get('name', product.name)
-            product.description = data.get('description', product.description)
-            product.price = data.get('price', product.price)
-            product.category = data.get('category', product.category)
-            product.image_url = data.get('image_url', product.image_url)
-            product.is_available = data.get('is_available', product.is_available)
-            
-            # Update additional fields if present
-            if 'weight' in data:
-                product.weight = data['weight']
-            if 'type' in data:
-                product.type = data['type']
-            if 'origin' in data:
-                product.origin = data['origin']
-            if 'process' in data:
-                product.process = data['process']
-            if 'roast_level' in data:
-                product.roast_level = data['roast_level']
-            if 'flavor_notes' in data:
-                product.flavor_notes = data['flavor_notes']
-            if 'brewing_methods' in data:
-                product.brewing_methods = data['brewing_methods']
-            if 'specifications' in data:
-                product.specifications = data['specifications']
-            if 'grade' in data:
-                product.grade = data['grade']
-            if 'certification' in data:
-                product.certification = data['certification']
-            if 'is_featured' in data:
-                product.is_featured = data['is_featured']
-            
-            db.session.commit()
-            return response.ok([], "Product updated successfully")
+
+        # Fallback to JSON update
+        data = request.json
+        if not data:
+            return response.bad_request([], "No data provided")
+        for key, val in data.items():
+            if key in allowed_cols:
+                if key in ('price', 'original_price', 'discount_percentage', 'rating'):
+                    try:
+                        setattr(product, key, float(val) if val is not None and val != '' else None)
+                    except Exception:
+                        setattr(product, key, val)
+                elif key in ('is_featured', 'is_discounted', 'is_available'):
+                    setattr(product, key, bool(val))
+                else:
+                    setattr(product, key, val)
+
+        if hasattr(product, 'calculate_discount'):
+            try:
+                product.calculate_discount()
+            except Exception:
+                pass
+
+        db.session.commit()
+        return response.ok([], "Product updated successfully")
         
     except Exception as e:
         print(e)

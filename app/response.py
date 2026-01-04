@@ -1,5 +1,4 @@
 from flask import jsonify, make_response
-
 def ok(values, message):
     res = {
         'data': values,

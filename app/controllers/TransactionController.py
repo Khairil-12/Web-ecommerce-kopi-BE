@@ -42,39 +42,25 @@ def store():
         payment_method = request.json.get('payment_method')
         shipping_address = request.json.get('shipping_address')
         notes = request.json.get('notes', '')
-        
-        # Validate user exists
         user = User.query.filter_by(id=user_id).first()
         if not user:
             return response.not_found([], "User not found")
-        
         if not items:
             return response.bad_request([], "No items in transaction")
-        
-        # Calculate total amount and check stock
         total_amount = 0
         transaction_items = []
-        
         for item in items:
             product_id = item.get('product_id')
             quantity = item.get('quantity', 1)
-            
-            # Get product
             product = Product.query.filter_by(id=product_id).first()
             if not product:
                 return response.not_found([], f"Product {product_id} not found")
-            
-            # Check stock
             stock = Stock.query.filter_by(product_id=product_id).first()
             if not stock or stock.quantity < quantity:
                 return response.bad_request([], f"Insufficient stock for product {product.name}")
-            
-            # Calculate subtotal
             price = float(product.price) if product.price else 0
             subtotal = price * quantity
             total_amount += subtotal
-            
-            # Prepare transaction item
             transaction_item = TransactionItem(
                 product_id=product_id,
                 quantity=quantity,
@@ -82,8 +68,6 @@ def store():
                 subtotal=subtotal
             )
             transaction_items.append(transaction_item)
-        
-        # Create transaction
         transaction = Transaction(
             transaction_code=generate_transaction_code(),
             user_id=user_id,
@@ -93,23 +77,15 @@ def store():
             shipping_address=shipping_address,
             notes=notes
         )
-        
         db.session.add(transaction)
-        db.session.flush()  # Get transaction ID
-        
-        # Add items to transaction
+        db.session.flush() 
         for item in transaction_items:
             item.transaction_id = transaction.id
             db.session.add(item)
-            
-            # Reduce stock
             stock = Stock.query.filter_by(product_id=item.product_id).first()
             stock.quantity -= item.quantity
-        
         db.session.commit()
-        
         return response.created(single_transform(transaction), "Transaction created successfully")
-        
     except Exception as e:
         db.session.rollback()
         print(e)
@@ -120,18 +96,13 @@ def update_status(id):
         transaction = Transaction.query.filter_by(id=id).first()
         if not transaction:
             return response.not_found([], "Transaction not found")
-        
         new_status = request.json.get('status')
         valid_statuses = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled']
-        
         if new_status not in valid_statuses:
             return response.bad_request([], f"Invalid status. Valid: {', '.join(valid_statuses)}")
-        
         transaction.status = new_status
         db.session.commit()
-        
         return response.ok([], f"Transaction status updated to {new_status}")
-        
     except Exception as e:
         print(e)
         return response.server_error([], f"Error: {e}")
@@ -150,20 +121,14 @@ def delete(id):
         transaction = Transaction.query.filter_by(id=id).first()
         if not transaction:
             return response.not_found([], "Transaction not found")
-        
-        # Restore stock if transaction is cancelled
         if transaction.status != 'cancelled':
-            # Restore stock for each item
             for item in transaction.items:
                 stock = Stock.query.filter_by(product_id=item.product_id).first()
                 if stock:
                     stock.quantity += item.quantity
-        
         db.session.delete(transaction)
         db.session.commit()
-        
         return response.ok([], "Transaction deleted successfully")
-        
     except Exception as e:
         print(e)
         return response.server_error([], f"Error: {e}")

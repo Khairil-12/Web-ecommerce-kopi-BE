@@ -7,7 +7,6 @@ from werkzeug.utils import secure_filename
 import shutil
 from datetime import datetime
 
-# Konfigurasi upload (simpan di static/img/products dan salin ke FE img/products)
 UPLOAD_FOLDER = 'static/img/products'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
@@ -18,17 +17,12 @@ def allowed_file(filename):
 def normalize_image_url(url):
     if not url:
         return url
-    # unify slashes
     url = url.replace('\\', '/')
     url = url.strip()
-    # normalize to a relative path WITHOUT leading 'static/' or leading slash
-    # strip leading slash if present
     if url.startswith('/'):
         url = url.lstrip('/')
-    # if it starts with 'static/', remove that prefix
     if url.startswith('static/'):
         url = url[len('static/'):]
-    # return relative path like 'img/..'
     return url
 
 def index():
@@ -56,19 +50,15 @@ def show(id):
 
 def store():
     try:
-        # Build list of allowed column names from model to avoid DB errors
         allowed_cols = set([c.name for c in Product.__table__.columns])
 
-        # Handle FormData (not JSON)
         if request.form:
-            # Basic required fields
             name = request.form.get('name')
             price = request.form.get('price')
             category = request.form.get('category')
             if not all([name, price, category]):
                 return response.bad_request([], "Name, price, and category are required")
 
-            # Prepare kwargs only for allowed columns
             kwargs = {}
             def add_if_allowed(key, val):
                 if key in allowed_cols:
@@ -84,12 +74,10 @@ def store():
                 add_if_allowed('price', price)
             add_if_allowed('original_price', float(request.form.get('original_price')) if request.form.get('original_price') else None)
             add_if_allowed('category', category)
-            # default image_url only if column exists
             if 'image_url' in allowed_cols:
                 kwargs.setdefault('image_url', '/static/images/default-product.jpg')
             add_if_allowed('is_available', request.form.get('is_available', '1') == '1')
 
-            # additional optional fields
             add_if_allowed('weight', request.form.get('weight'))
             add_if_allowed('type', request.form.get('type'))
             add_if_allowed('origin', request.form.get('origin'))
@@ -119,7 +107,6 @@ def store():
             db.session.add(product)
             db.session.flush()
 
-            # Handle file upload
             if 'image' in request.files and 'image_url' in allowed_cols:
                 image = request.files['image']
                 if image and allowed_file(image.filename):
@@ -128,11 +115,8 @@ def store():
                         os.makedirs(UPLOAD_FOLDER)
                     image_path = os.path.join(UPLOAD_FOLDER, filename)
                     image.save(image_path)
-                    # simpan URL relatif tanpa leading '/static/' (gunakan 'img/...')
                     product.image_url = f'img/products/{filename}'
-                    # coba salin juga ke folder front-end jika tersedia
                     try:
-                        # hitung path repo root dari lokasi file ini
                         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
                         fe_img_dir = os.path.abspath(os.path.join(base_dir, '..', 'Web-ecommerce-kopi FE', 'img', 'products'))
                         if not os.path.exists(fe_img_dir):
@@ -141,14 +125,12 @@ def store():
                     except Exception as e:
                         print('FE copy error (store):', e)
 
-            # Calculate discount if available
             if hasattr(product, 'calculate_discount'):
                 try:
                     product.calculate_discount()
                 except Exception:
                     pass
 
-            # Create stock entry if model exists
             try:
                 stock_quantity = int(request.form.get('stock', 0))
             except Exception:
@@ -162,7 +144,6 @@ def store():
             db.session.commit()
             return response.created([], "Product created successfully")
         else:
-            # Fallback to JSON
             data = request.json
             if not data:
                 return response.bad_request([], "No data provided")
@@ -190,7 +171,6 @@ def store():
             add_if_allowed_json('category', category)
             add_if_allowed_json('image_url', data.get('image_url', '/static/images/default-product.jpg'))
             add_if_allowed_json('is_available', data.get('is_available', True))
-            # optional fields
             for fld in ['weight','type','origin','process','roast_level','flavor_notes','brewing_methods','specifications','grade','certification','is_featured']:
                 add_if_allowed_json(fld, data.get(fld))
 
@@ -222,17 +202,14 @@ def update(id):
         product = Product.query.filter_by(id=id).first()
         if not product:
             return response.not_found([], "Product not found")
-        # Build allowed columns set
         allowed_cols = set([c.name for c in Product.__table__.columns])
 
-        # If form data, update allowed fields from form
         if request.form:
             for key in request.form.keys():
                 if key in allowed_cols:
                     val = request.form.get(key)
                     if key == 'image_url' and val:
                         val = normalize_image_url(val)
-                    # convert basic numeric fields
                     if key in ('price', 'original_price', 'discount_percentage', 'rating'):
                         try:
                             if val is None or val == '':
@@ -246,14 +223,12 @@ def update(id):
                     else:
                         setattr(product, key, val)
 
-            # Handle file upload safely
             if 'image' in request.files and 'image_url' in allowed_cols:
                 image = request.files['image']
                 if image and allowed_file(image.filename):
                     filename = secure_filename(f"{product.id}_{image.filename}")
                     if not os.path.exists(UPLOAD_FOLDER):
                         os.makedirs(UPLOAD_FOLDER)
-                    # attempt to remove old file if it's a local path
                     try:
                         old_path = None
                         if product.image_url and product.image_url.startswith('/static/'):
@@ -275,7 +250,6 @@ def update(id):
                     except Exception as e:
                         print('FE copy error (update):', e)
 
-            # Recalculate discount if available
             if hasattr(product, 'calculate_discount'):
                 try:
                     product.calculate_discount()
@@ -286,7 +260,6 @@ def update(id):
             db.session.commit()
             return response.ok([], "Product updated successfully")
 
-        # Fallback to JSON update
         data = request.json
         if not data:
             return response.bad_request([], "No data provided")
@@ -334,7 +307,6 @@ def delete(id):
 def transform(products):
     array = []
     for product in products:
-        # normalize specifications into an array `specs` for frontend convenience
         raw_specs = product.specifications
         specs = []
         try:
@@ -344,7 +316,6 @@ def transform(products):
                 specs = list(raw_specs)
             else:
                 s = str(raw_specs).strip()
-                # try parse JSON array first
                 try:
                     import json
 
@@ -354,7 +325,6 @@ def transform(products):
                     else:
                         specs = []
                 except Exception:
-                    # split on newlines, <br>, semicolon or pipe. Avoid splitting on comma (may be part of values)
                     import re
 
                     parts = re.split(r"\r?\n|<br\s*/?>|;|\|", s)
@@ -362,7 +332,6 @@ def transform(products):
         except Exception:
             specs = []
 
-        # build metadata from specs (e.g. 'Asal: Gayo' -> spec_meta['asal'] = 'Gayo')
         spec_meta = {}
         try:
             for s in specs:
@@ -406,7 +375,6 @@ def transform(products):
     return array
 
 def single_transform(product):
-    # prepare specs array similar to transform()
     raw_specs = product.specifications
     specs = []
     try:
@@ -432,7 +400,6 @@ def single_transform(product):
     except Exception:
         specs = []
 
-    # build metadata from specs
     spec_meta = {}
     try:
         for s in specs:

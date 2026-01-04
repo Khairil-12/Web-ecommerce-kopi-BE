@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 bp = Blueprint('api', __name__)
 
 # Konfigurasi upload
-UPLOAD_FOLDER = 'static/uploads/products'
+UPLOAD_FOLDER = 'static/img/products'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 def allowed_file(filename):

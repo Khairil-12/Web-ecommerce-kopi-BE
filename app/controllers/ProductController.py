@@ -4,14 +4,32 @@ from app import response, db
 from flask import request
 import os
 from werkzeug.utils import secure_filename
+import shutil
 from datetime import datetime
 
-# Konfigurasi upload
-UPLOAD_FOLDER = 'static/uploads/products'
+# Konfigurasi upload (simpan di static/img/products dan salin ke FE img/products)
+UPLOAD_FOLDER = 'static/img/products'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def normalize_image_url(url):
+    if not url:
+        return url
+    # unify slashes
+    url = url.replace('\\', '/')
+    url = url.strip()
+    # normalize to a relative path WITHOUT leading 'static/' or leading slash
+    # strip leading slash if present
+    if url.startswith('/'):
+        url = url.lstrip('/')
+    # if it starts with 'static/', remove that prefix
+    if url.startswith('static/'):
+        url = url[len('static/'):]
+    # return relative path like 'img/..'
+    return url
 
 def index():
     try:
@@ -54,6 +72,8 @@ def store():
             kwargs = {}
             def add_if_allowed(key, val):
                 if key in allowed_cols:
+                    if key == 'image_url' and val:
+                        val = normalize_image_url(val)
                     kwargs[key] = val
 
             add_if_allowed('name', name)
@@ -108,7 +128,18 @@ def store():
                         os.makedirs(UPLOAD_FOLDER)
                     image_path = os.path.join(UPLOAD_FOLDER, filename)
                     image.save(image_path)
-                    product.image_url = f'/static/uploads/products/{filename}'
+                    # simpan URL relatif tanpa leading '/static/' (gunakan 'img/...')
+                    product.image_url = f'img/products/{filename}'
+                    # coba salin juga ke folder front-end jika tersedia
+                    try:
+                        # hitung path repo root dari lokasi file ini
+                        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+                        fe_img_dir = os.path.abspath(os.path.join(base_dir, '..', 'Web-ecommerce-kopi FE', 'img', 'products'))
+                        if not os.path.exists(fe_img_dir):
+                            os.makedirs(fe_img_dir)
+                        shutil.copy(image_path, os.path.join(fe_img_dir, filename))
+                    except Exception as e:
+                        print('FE copy error (store):', e)
 
             # Calculate discount if available
             if hasattr(product, 'calculate_discount'):
@@ -145,6 +176,8 @@ def store():
             kwargs = {}
             def add_if_allowed_json(key, val):
                 if key in allowed_cols and val is not None:
+                    if key == 'image_url' and val:
+                        val = normalize_image_url(val)
                     kwargs[key] = val
 
             add_if_allowed_json('name', name)
@@ -197,6 +230,8 @@ def update(id):
             for key in request.form.keys():
                 if key in allowed_cols:
                     val = request.form.get(key)
+                    if key == 'image_url' and val:
+                        val = normalize_image_url(val)
                     # convert basic numeric fields
                     if key in ('price', 'original_price', 'discount_percentage', 'rating'):
                         try:
@@ -222,7 +257,7 @@ def update(id):
                     try:
                         old_path = None
                         if product.image_url and product.image_url.startswith('/static/'):
-                            old_path = product.image_url.replace('/static/', '')
+                            old_path = product.image_url.lstrip('/')
                             if os.path.exists(old_path):
                                 os.remove(old_path)
                     except Exception:
@@ -230,7 +265,15 @@ def update(id):
 
                     image_path = os.path.join(UPLOAD_FOLDER, filename)
                     image.save(image_path)
-                    product.image_url = f'/static/uploads/products/{filename}'
+                    product.image_url = f'img/products/{filename}'
+                    try:
+                        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+                        fe_img_dir = os.path.abspath(os.path.join(base_dir, '..', 'Web-ecommerce-kopi FE', 'img', 'products'))
+                        if not os.path.exists(fe_img_dir):
+                            os.makedirs(fe_img_dir)
+                        shutil.copy(image_path, os.path.join(fe_img_dir, filename))
+                    except Exception as e:
+                        print('FE copy error (update):', e)
 
             # Recalculate discount if available
             if hasattr(product, 'calculate_discount'):
@@ -249,6 +292,8 @@ def update(id):
             return response.bad_request([], "No data provided")
         for key, val in data.items():
             if key in allowed_cols:
+                if key == 'image_url' and val:
+                    val = normalize_image_url(val)
                 if key in ('price', 'original_price', 'discount_percentage', 'rating'):
                     try:
                         setattr(product, key, float(val) if val is not None and val != '' else None)

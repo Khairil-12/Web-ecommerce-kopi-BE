@@ -6,7 +6,7 @@ import os
 from werkzeug.utils import secure_filename
 
 bp = Blueprint('api', __name__)
-UPLOAD_FOLDER = 'static/img/products'
+UPLOAD_FOLDER = 'img/products'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS

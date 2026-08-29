@@ -1,7 +1,5 @@
 flask==3.0.0
-flask-sqlalchemy==3.1.1
-flask-migrate==4.0.5
-pymysql==1.1.0
 python-dotenv==1.0.0
 werkzeug==3.0.1
 Flask-Cors==3.0.10
+supabase==2.31.0

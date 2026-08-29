@@ -1,11 +1,11 @@
 from app.models.user import User
-from app import response, db
+from app import response
 from flask import request
 import json
 
 def index():
     try:
-        users = User.query.all()
+        users = User.get_all()
         data = transform(users)
         return response.ok(data, "")
     except Exception as e:
@@ -14,7 +14,7 @@ def index():
 
 def show(id):
     try:
-        user = User.query.filter_by(id=id).first()
+        user = User.get_by_id(id)
         if not user:
             return response.not_found([], "User not found")
         data = single_transform(user)
@@ -30,21 +30,27 @@ def store():
         password = request.json.get('password')
         phone = request.json.get('phone', '')
         address = request.json.get('address', '')
-        is_admin = request.json.get('is_admin', False) 
-        if User.query.filter_by(email=email).first():
+        is_admin = request.json.get('is_admin', False)
+        
+        if User.get_by_email(email):
             return response.bad_request([], "Email already registered")
-        if User.query.filter_by(username=username).first():
+        if User.get_by_username(username):
             return response.bad_request([], "Username already taken")
-        user = User(
-            username=username,
-            email=email,
-            phone=phone,
-            address=address
-        )
-        user.set_password(password)
-        user.is_admin = is_admin 
-        db.session.add(user)
-        db.session.commit()
+        
+        user_data = {
+            'username': username,
+            'email': email,
+            'password': password,
+            'phone': phone,
+            'address': address,
+            'is_admin': is_admin,
+            'full_name': request.json.get('full_name'),
+            'city': request.json.get('city'),
+            'postal_code': request.json.get('postal_code'),
+            'province': request.json.get('province')
+        }
+        
+        User.create(user_data)
         return response.created([], "User created successfully")
     except Exception as e:
         print(e)
@@ -52,16 +58,31 @@ def store():
 
 def update(id):
     try:
-        user = User.query.filter_by(id=id).first()
+        user = User.get_by_id(id)
         if not user:
             return response.not_found([], "User not found")
-        user.username = request.json.get('username', user.username)
-        user.email = request.json.get('email', user.email)
-        user.phone = request.json.get('phone', user.phone)
-        user.address = request.json.get('address', user.address)
+        
+        update_data = {}
+        if 'username' in request.json:
+            update_data['username'] = request.json['username']
+        if 'email' in request.json:
+            update_data['email'] = request.json['email']
+        if 'phone' in request.json:
+            update_data['phone'] = request.json['phone']
+        if 'address' in request.json:
+            update_data['address'] = request.json['address']
         if 'password' in request.json:
-            user.set_password(request.json['password'])
-        db.session.commit()
+            update_data['password'] = request.json['password']
+        if 'full_name' in request.json:
+            update_data['full_name'] = request.json['full_name']
+        if 'city' in request.json:
+            update_data['city'] = request.json['city']
+        if 'postal_code' in request.json:
+            update_data['postal_code'] = request.json['postal_code']
+        if 'province' in request.json:
+            update_data['province'] = request.json['province']
+        
+        User.update(id, update_data)
         return response.ok([], "User updated successfully")
     except Exception as e:
         print(e)
@@ -69,11 +90,10 @@ def update(id):
 
 def delete(id):
     try:
-        user = User.query.filter_by(id=id).first()
+        user = User.get_by_id(id)
         if not user:
             return response.not_found([], "User not found")
-        db.session.delete(user)
-        db.session.commit()
+        User.delete(id)
         return response.ok([], "User deleted successfully")
     except Exception as e:
         print(e)
@@ -83,24 +103,24 @@ def transform(users):
     array = []
     for user in users:
         array.append({
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'phone': user.phone,
-            'address': user.address, 
-            'is_admin': user.is_admin,
-            'created_at': user.created_at.isoformat() if user.created_at else None
+            'id': user.get('id'),
+            'username': user.get('username'),
+            'email': user.get('email'),
+            'phone': user.get('phone'),
+            'address': user.get('address'),
+            'is_admin': user.get('is_admin'),
+            'created_at': user.get('created_at')
         })
     return array
 
 def single_transform(user):
     return {
-        'id': user.id,
-        'username': user.username,
-        'email': user.email,
-        'phone': user.phone,
-        'address': user.address,
-        'is_admin': user.is_admin,
-        'created_at': user.created_at.isoformat() if user.created_at else None,
-        'updated_at': user.updated_at.isoformat() if user.updated_at else None
+        'id': user.get('id'),
+        'username': user.get('username'),
+        'email': user.get('email'),
+        'phone': user.get('phone'),
+        'address': user.get('address'),
+        'is_admin': user.get('is_admin'),
+        'created_at': user.get('created_at'),
+        'updated_at': user.get('updated_at')
     }

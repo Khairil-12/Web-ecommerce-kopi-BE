@@ -1,28 +1,78 @@
-from app import db
+from app.supabase_client import db
 from datetime import datetime
 
-class Cart(db.Model):
-    __tablename__ = 'carts'
+class Cart:
+    table_name = 'carts'
     
-    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.BigInteger, db.ForeignKey('users.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    @staticmethod
+    def create(data):
+        payload = {
+            'user_id': data.get('user_id'),
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        response = db.table(Cart.table_name).insert(payload).execute()
+        return response.data[0] if response.data else None
     
-    # Relationships
-    items = db.relationship('CartItem', backref='cart', lazy=True)
+    @staticmethod
+    def get_by_id(cart_id):
+        response = db.table(Cart.table_name).select("*").eq('id', cart_id).execute()
+        return response.data[0] if response.data else None
     
-    def __repr__(self):
-        return f'<Cart {self.id}>'
+    @staticmethod
+    def get_by_user_id(user_id):
+        response = db.table(Cart.table_name).select("*").eq('user_id', user_id).execute()
+        return response.data[0] if response.data else None
+    
+    @staticmethod
+    def delete(cart_id):
+        response = db.table(Cart.table_name).delete().eq('id', cart_id).execute()
+        return response.data
 
-class CartItem(db.Model):
-    __tablename__ = 'cart_items'
+class CartItem:
+    table_name = 'cart_items'
     
-    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
-    cart_id = db.Column(db.BigInteger, db.ForeignKey('carts.id'), nullable=False)
-    product_id = db.Column(db.BigInteger, db.ForeignKey('products.id'), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False, default=1)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    @staticmethod
+    def create(data):
+        payload = {
+            'cart_id': data.get('cart_id'),
+            'product_id': data.get('product_id'),
+            'quantity': int(data.get('quantity', 1)),
+            'created_at': datetime.utcnow().isoformat()
+        }
+        response = db.table(CartItem.table_name).insert(payload).execute()
+        return response.data[0] if response.data else None
     
-    def __repr__(self):
-        return f'<CartItem {self.id}>'
+    @staticmethod
+    def get_by_id(item_id):
+        response = db.table(CartItem.table_name).select("*").eq('id', item_id).execute()
+        return response.data[0] if response.data else None
+    
+    @staticmethod
+    def get_by_cart_id(cart_id):
+        response = db.table(CartItem.table_name).select("*").eq('cart_id', cart_id).execute()
+        return response.data if response.data else []
+    
+    @staticmethod
+    def get_by_cart_and_product(cart_id, product_id):
+        response = db.table(CartItem.table_name).select("*").eq('cart_id', cart_id).eq('product_id', product_id).execute()
+        return response.data[0] if response.data else None
+    
+    @staticmethod
+    def update(item_id, data):
+        payload = {}
+        if 'quantity' in data:
+            payload['quantity'] = int(data['quantity'])
+        
+        response = db.table(CartItem.table_name).update(payload).eq('id', item_id).execute()
+        return response.data[0] if response.data else None
+    
+    @staticmethod
+    def delete(item_id):
+        response = db.table(CartItem.table_name).delete().eq('id', item_id).execute()
+        return response.data
+    
+    @staticmethod
+    def delete_by_cart_id(cart_id):
+        response = db.table(CartItem.table_name).delete().eq('cart_id', cart_id).execute()
+        return response.data
